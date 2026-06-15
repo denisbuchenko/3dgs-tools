@@ -37,6 +37,47 @@ type VideoSettings = {
   endSecond: string;
 };
 
+type ColmapMatcher = "sequential" | "exhaustive";
+
+type ColmapSettings = {
+  useGpu: boolean;
+  gpuIndex: string;
+  matcher: ColmapMatcher;
+  cameraModel: string;
+  singleCamera: boolean;
+  maxImageSize: number;
+  maxNumFeatures: number;
+  guidedMatching: boolean;
+  sequentialOverlap: number;
+  sequentialLoopDetection: boolean;
+  mapperMinNumMatches: number;
+  mapperMultipleModels: boolean;
+  mapperExtractColors: boolean;
+};
+
+type ColmapStep = {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "done" | "failed";
+};
+
+type ColmapJob = {
+  projectId: string;
+  status: "idle" | "running" | "done" | "failed";
+  settings: ColmapSettings;
+  steps: ColmapStep[];
+  logs: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  output?: {
+    workspace: string;
+    sparse: string;
+    text: string;
+    ply: string;
+  };
+};
+
 const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
 const apiBaseUrl = `${apiOrigin}/api`;
 
@@ -162,6 +203,40 @@ async function deleteAllProjectImages(projectId: string) {
   }
 }
 
+async function requestColmapDefaults(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/colmap/defaults`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить настройки COLMAP.");
+  }
+
+  return (await response.json()) as ColmapSettings;
+}
+
+async function requestColmapJob(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/colmap`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось получить статус COLMAP.");
+  }
+
+  return (await response.json()) as ColmapJob;
+}
+
+async function startColmap(projectId: string, settings: ColmapSettings) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/colmap`, {
+    body: JSON.stringify({ settings }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Не удалось запустить COLMAP.");
+  }
+
+  return (await response.json()) as ColmapJob;
+}
+
 function mediaUrl(url: string) {
   return `${apiOrigin}${url}`;
 }
@@ -187,6 +262,11 @@ export default function App() {
     startSecond: "",
     endSecond: "",
   });
+  const [colmapSettings, setColmapSettings] = useState<ColmapSettings | null>(null);
+  const [colmapJob, setColmapJob] = useState<ColmapJob | null>(null);
+  const [isColmapLoading, setIsColmapLoading] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [logScrollTop, setLogScrollTop] = useState(0);
   const [lightboxImage, setLightboxImage] = useState<ProjectImage | null>(null);
   const [openImageMenuId, setOpenImageMenuId] = useState<string | null>(null);
   const [isLightboxMenuOpen, setIsLightboxMenuOpen] = useState(false);
@@ -197,11 +277,18 @@ export default function App() {
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const logViewportRef = useRef<HTMLDivElement>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId) ?? null,
     [projects, selectedId]
   );
+  const colmapLogs = colmapJob?.logs ?? [];
+  const logRowHeight = 22;
+  const logViewportHeight = 420;
+  const firstLogIndex = Math.max(0, Math.floor(logScrollTop / logRowHeight) - 8);
+  const visibleLogCount = Math.ceil(logViewportHeight / logRowHeight) + 16;
+  const visibleLogs = colmapLogs.slice(firstLogIndex, firstLogIndex + visibleLogCount);
 
   useEffect(() => {
     requestProjects()
@@ -227,6 +314,8 @@ export default function App() {
     setOpenImageMenuId(null);
     setIsLightboxMenuOpen(false);
     setIsVideoModalOpen(false);
+    setColmapSettings(null);
+    setColmapJob(null);
 
     requestProjectImages(selectedId)
       .then(setImages)
@@ -234,7 +323,43 @@ export default function App() {
         setError(requestError instanceof Error ? requestError.message : "Ошибка загрузки изображений.");
       })
       .finally(() => setIsImagesLoading(false));
+
+    requestColmapDefaults(selectedId)
+      .then(setColmapSettings)
+      .catch((requestError: unknown) => {
+        setError(requestError instanceof Error ? requestError.message : "Ошибка загрузки COLMAP.");
+      });
+
+    requestColmapJob(selectedId)
+      .then(setColmapJob)
+      .catch(() => undefined);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || colmapJob?.status !== "running") {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      requestColmapJob(selectedId)
+        .then(setColmapJob)
+        .catch((requestError: unknown) => {
+          setError(requestError instanceof Error ? requestError.message : "Ошибка статуса COLMAP.");
+        });
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [colmapJob?.status, selectedId]);
+
+  useEffect(() => {
+    if (!isLogsOpen || !logViewportRef.current) {
+      return;
+    }
+
+    const nextScrollTop = Math.max(0, colmapLogs.length * logRowHeight - logViewportHeight);
+    logViewportRef.current.scrollTop = nextScrollTop;
+    setLogScrollTop(nextScrollTop);
+  }, [isLogsOpen, colmapLogs.length]);
 
   async function handleSubmitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -476,6 +601,31 @@ export default function App() {
     }
   }
 
+  function updateColmapSetting<Key extends keyof ColmapSettings>(
+    key: Key,
+    value: ColmapSettings[Key]
+  ) {
+    setColmapSettings((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  async function handleStartColmap() {
+    if (!selectedProject || !colmapSettings) {
+      return;
+    }
+
+    setIsColmapLoading(true);
+    setError("");
+
+    try {
+      const job = await startColmap(selectedProject.id, colmapSettings);
+      setColmapJob(job);
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : "Ошибка запуска COLMAP.");
+    } finally {
+      setIsColmapLoading(false);
+    }
+  }
+
   const isModalOpen = modalMode !== null;
   const modalProject = modalMode === "edit" ? selectedProject : null;
   const visibleImages = isGalleryExpanded ? images : images.slice(0, 4);
@@ -633,6 +783,228 @@ export default function App() {
                 </button>
               ) : null}
             </section>
+
+            {images.length > 0 && colmapSettings ? (
+              <section className="colmap-section" aria-label="COLMAP">
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">COLMAP</p>
+                    <h2>Реконструкция</h2>
+                  </div>
+                  <div className="image-actions">
+                    <button
+                      className="primary"
+                      type="button"
+                      onClick={handleStartColmap}
+                      disabled={isColmapLoading || colmapJob?.status === "running"}
+                    >
+                      Запустить COLMAP
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => {
+                        setIsLogsOpen(true);
+                        setLogScrollTop(Math.max(0, colmapLogs.length * logRowHeight - logViewportHeight));
+                      }}
+                      disabled={colmapLogs.length === 0}
+                    >
+                      Показать логи
+                    </button>
+                  </div>
+                </div>
+
+                <div className="colmap-grid">
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.useGpu}
+                      onChange={(event) => updateColmapSetting("useGpu", event.target.checked)}
+                      disabled={colmapJob?.status === "running"}
+                    />
+                    <span>Использовать GPU</span>
+                  </label>
+
+                  <label className="field">
+                    <span>GPU index</span>
+                    <input
+                      value={colmapSettings.gpuIndex}
+                      onChange={(event) => updateColmapSetting("gpuIndex", event.target.value)}
+                      disabled={colmapJob?.status === "running" || !colmapSettings.useGpu}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Матчинг</span>
+                    <select
+                      value={colmapSettings.matcher}
+                      onChange={(event) =>
+                        updateColmapSetting("matcher", event.target.value as ColmapMatcher)
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    >
+                      <option value="sequential">Последовательный</option>
+                      <option value="exhaustive">Полный</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Перекрытие кадров</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value={colmapSettings.sequentialOverlap}
+                      onChange={(event) =>
+                        updateColmapSetting("sequentialOverlap", Number(event.target.value))
+                      }
+                      disabled={colmapJob?.status === "running" || colmapSettings.matcher !== "sequential"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Модель камеры</span>
+                    <select
+                      value={colmapSettings.cameraModel}
+                      onChange={(event) => updateColmapSetting("cameraModel", event.target.value)}
+                      disabled={colmapJob?.status === "running"}
+                    >
+                      <option>SIMPLE_RADIAL</option>
+                      <option>PINHOLE</option>
+                      <option>SIMPLE_PINHOLE</option>
+                      <option>OPENCV</option>
+                      <option>RADIAL</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Макс. размер изображения</span>
+                    <input
+                      type="number"
+                      min="512"
+                      max="10000"
+                      step="128"
+                      value={colmapSettings.maxImageSize}
+                      onChange={(event) =>
+                        updateColmapSetting("maxImageSize", Number(event.target.value))
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Макс. признаков</span>
+                    <input
+                      type="number"
+                      min="512"
+                      max="65536"
+                      step="512"
+                      value={colmapSettings.maxNumFeatures}
+                      onChange={(event) =>
+                        updateColmapSetting("maxNumFeatures", Number(event.target.value))
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Мин. matches для mapper</span>
+                    <input
+                      type="number"
+                      min="4"
+                      max="100"
+                      step="1"
+                      value={colmapSettings.mapperMinNumMatches}
+                      onChange={(event) =>
+                        updateColmapSetting("mapperMinNumMatches", Number(event.target.value))
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    />
+                  </label>
+                </div>
+
+                <div className="colmap-toggles">
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.singleCamera}
+                      onChange={(event) => updateColmapSetting("singleCamera", event.target.checked)}
+                      disabled={colmapJob?.status === "running"}
+                    />
+                    <span>Одна камера для всех изображений</span>
+                  </label>
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.guidedMatching}
+                      onChange={(event) => updateColmapSetting("guidedMatching", event.target.checked)}
+                      disabled={colmapJob?.status === "running"}
+                    />
+                    <span>Guided matching</span>
+                  </label>
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.sequentialLoopDetection}
+                      onChange={(event) =>
+                        updateColmapSetting("sequentialLoopDetection", event.target.checked)
+                      }
+                      disabled={colmapJob?.status === "running" || colmapSettings.matcher !== "sequential"}
+                    />
+                    <span>Loop detection</span>
+                  </label>
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.mapperMultipleModels}
+                      onChange={(event) =>
+                        updateColmapSetting("mapperMultipleModels", event.target.checked)
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    />
+                    <span>Несколько моделей</span>
+                  </label>
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={colmapSettings.mapperExtractColors}
+                      onChange={(event) =>
+                        updateColmapSetting("mapperExtractColors", event.target.checked)
+                      }
+                      disabled={colmapJob?.status === "running"}
+                    />
+                    <span>Цвета точек</span>
+                  </label>
+                </div>
+
+                {colmapJob ? (
+                  <div className="pipeline">
+                    {colmapJob.steps.map((step) => (
+                      <div className={`pipeline-step ${step.status}`} key={step.id}>
+                        <span className="step-dot" />
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {colmapJob?.status === "running" ? (
+                  <div className="loader-row">
+                    <span className="loader" aria-hidden="true" />
+                    <span>COLMAP выполняется...</span>
+                  </div>
+                ) : null}
+
+                {colmapJob?.status === "done" && colmapJob.output ? (
+                  <p className="folder-name">colmap/points.ply</p>
+                ) : null}
+
+                {colmapJob?.status === "failed" && colmapJob.error ? (
+                  <p className="error-message">{colmapJob.error}</p>
+                ) : null}
+              </section>
+            ) : null}
           </div>
         ) : (
           <div className="empty-state">
@@ -790,6 +1162,37 @@ export default function App() {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {isLogsOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal logs-modal" aria-label="Логи COLMAP">
+            <header className="modal-header logs-header">
+              <h2>Логи COLMAP</h2>
+              <button className="ghost" type="button" onClick={() => setIsLogsOpen(false)}>
+                Закрыть
+              </button>
+            </header>
+            <div
+              ref={logViewportRef}
+              className="log-viewport"
+              onScroll={(event) => setLogScrollTop(event.currentTarget.scrollTop)}
+            >
+              <div style={{ height: colmapLogs.length * logRowHeight, position: "relative" }}>
+                <div
+                  className="log-lines"
+                  style={{ transform: `translateY(${firstLogIndex * logRowHeight}px)` }}
+                >
+                  {visibleLogs.map((line, index) => (
+                    <div className="log-line" key={`${firstLogIndex + index}-${line}`}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 

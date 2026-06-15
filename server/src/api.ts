@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { uploadProjectImages } from "./imLoader.js";
+import { getColmapJob, getDefaultColmapSettings, startColmapJob } from "./colmap.js";
 import {
   deleteAllProjectImages,
   deleteProjectImage,
@@ -113,6 +114,16 @@ function getProjectVideosRoute(pathname: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getProjectColmapRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectColmapDefaultsRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/defaults$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function getProjectImageFileRoute(pathname: string) {
   const match = pathname.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/(original|thumbnail)$/);
 
@@ -176,6 +187,32 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
 
   const projectImagesId = getProjectImagesRoute(url.pathname);
   const projectVideosId = getProjectVideosRoute(url.pathname);
+  const projectColmapId = getProjectColmapRoute(url.pathname);
+  const projectColmapDefaultsId = getProjectColmapDefaultsRoute(url.pathname);
+
+  if (projectColmapDefaultsId && request.method === "GET") {
+    sendJson(response, 200, getDefaultColmapSettings());
+    return;
+  }
+
+  if (projectColmapId && request.method === "GET") {
+    sendJson(response, 200, getColmapJob(projectColmapId));
+    return;
+  }
+
+  if (projectColmapId && request.method === "POST") {
+    const { project } = await getProjectById(projectColmapId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    const body = (await readBody(request)) as { settings?: unknown };
+    const job = startColmapJob(project, (body.settings ?? {}) as Parameters<typeof startColmapJob>[1]);
+    sendJson(response, 202, job);
+    return;
+  }
 
   if (projectImagesId && request.method === "GET") {
     const { project } = await getProjectById(projectImagesId);
