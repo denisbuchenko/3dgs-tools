@@ -24,6 +24,19 @@ type ProjectImage = {
   createdAt: string;
 };
 
+type VideoMetadata = {
+  duration: number;
+  width: number;
+  height: number;
+};
+
+type VideoSettings = {
+  fps: string;
+  reductionPercent: string;
+  startSecond: string;
+  endSecond: string;
+};
+
 const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
 const apiBaseUrl = `${apiOrigin}/api`;
 
@@ -104,6 +117,28 @@ async function uploadProjectImages(projectId: string, files: FileList) {
   return (await response.json()) as ProjectImage[];
 }
 
+async function uploadProjectVideo(projectId: string, file: File, settings: VideoSettings) {
+  const form = new FormData();
+  const reductionPercent = Math.min(99, Math.max(0, Number(settings.reductionPercent) || 0));
+
+  form.append("video", file);
+  form.append("fps", settings.fps);
+  form.append("scalePercent", String(100 - reductionPercent));
+  form.append("startSecond", settings.startSecond);
+  form.append("endSecond", settings.endSecond);
+
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/videos`, {
+    body: form,
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Не удалось обработать видео.");
+  }
+
+  return (await response.json()) as ProjectImage[];
+}
+
 async function deleteProjectImage(projectId: string, imageId: string) {
   const response = await fetch(
     `${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/images/${encodeURIComponent(imageId)}`,
@@ -143,6 +178,15 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [images, setImages] = useState<ProjectImage[]>([]);
   const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
+  const [videoSettings, setVideoSettings] = useState<VideoSettings>({
+    fps: "",
+    reductionPercent: "",
+    startSecond: "",
+    endSecond: "",
+  });
   const [lightboxImage, setLightboxImage] = useState<ProjectImage | null>(null);
   const [openImageMenuId, setOpenImageMenuId] = useState<string | null>(null);
   const [isLightboxMenuOpen, setIsLightboxMenuOpen] = useState(false);
@@ -152,6 +196,7 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId) ?? null,
@@ -181,6 +226,7 @@ export default function App() {
     setLightboxImage(null);
     setOpenImageMenuId(null);
     setIsLightboxMenuOpen(false);
+    setIsVideoModalOpen(false);
 
     requestProjectImages(selectedId)
       .then(setImages)
@@ -273,6 +319,115 @@ export default function App() {
     } finally {
       setIsSaving(false);
       event.target.value = "";
+    }
+  }
+
+  function handleVideoFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setVideoFile(file);
+    setVideoMetadata(null);
+    setVideoSettings({
+      fps: "",
+      reductionPercent: "",
+      startSecond: "",
+      endSecond: "",
+    });
+    setError("");
+
+    if (!file) {
+      return;
+    }
+
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+
+    video.preload = "metadata";
+    video.src = objectUrl;
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+
+      setVideoMetadata({
+        duration,
+        width: video.videoWidth,
+        height: video.videoHeight,
+      });
+      setVideoSettings((current) => ({
+        ...current,
+        fps: "1",
+        reductionPercent: "0",
+        startSecond: "0",
+        endSecond: duration ? duration.toFixed(2) : "",
+      }));
+      URL.revokeObjectURL(objectUrl);
+    };
+    video.onerror = () => {
+      setError("Не удалось прочитать метаданные видео.");
+      URL.revokeObjectURL(objectUrl);
+    };
+  }
+
+  function updateVideoSetting(name: keyof VideoSettings, value: string) {
+    setVideoSettings((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  function closeVideoModal() {
+    setIsVideoModalOpen(false);
+    setVideoFile(null);
+    setVideoMetadata(null);
+    setVideoSettings({
+      fps: "",
+      reductionPercent: "",
+      startSecond: "",
+      endSecond: "",
+    });
+
+    if (videoInputRef.current) {
+      videoInputRef.current.value = "";
+    }
+  }
+
+  async function handleUploadVideo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedProject || !videoFile || !videoMetadata) {
+      return;
+    }
+
+    const startSecond = Number(videoSettings.startSecond);
+    const endSecond = Number(videoSettings.endSecond);
+
+    if (
+      !Number.isFinite(startSecond) ||
+      !Number.isFinite(endSecond) ||
+      startSecond < 0 ||
+      endSecond <= startSecond ||
+      endSecond > videoMetadata.duration
+    ) {
+      setError("Проверьте диапазон секунд: он должен быть внутри длительности видео.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const uploadedImages = await uploadProjectVideo(selectedProject.id, videoFile, videoSettings);
+      setImages(uploadedImages);
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === selectedProject.id
+            ? { ...project, updatedAt: new Date().toISOString() }
+            : project
+        )
+      );
+      closeVideoModal();
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : "Ошибка обработки видео.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -403,6 +558,14 @@ export default function App() {
                     Добавить изображения
                   </button>
                   <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => setIsVideoModalOpen(true)}
+                    disabled={isSaving}
+                  >
+                    Добавить видео
+                  </button>
+                  <button
                     className="ghost"
                     type="button"
                     onClick={handleDeleteAllImages}
@@ -516,6 +679,114 @@ export default function App() {
               </button>
               <button className="primary" type="submit" disabled={isSaving}>
                 {modalMode === "edit" ? "Сохранить" : "Создать"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {isVideoModalOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="modal video-modal" onSubmit={handleUploadVideo} aria-label="Загрузка видео">
+            <header className="modal-header">
+              <h2>Добавить видео</h2>
+            </header>
+
+            <label className="field">
+              <span>Видео</span>
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleVideoFileChange}
+                required
+              />
+            </label>
+
+            {videoMetadata ? (
+              <div className="video-meta">
+                <span>Длительность: {videoMetadata.duration.toFixed(2)} сек</span>
+                <span>
+                  Разрешение: {videoMetadata.width} x {videoMetadata.height}
+                </span>
+              </div>
+            ) : (
+              <p className="side-note">Выберите видео, чтобы заполнить параметры обработки.</p>
+            )}
+
+            <div className="settings-grid">
+              <label className="field">
+                <span>FPS</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  step="1"
+                  value={videoSettings.fps}
+                  onChange={(event) => updateVideoSetting("fps", event.target.value)}
+                  disabled={!videoMetadata}
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Уменьшить на, %</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="99"
+                  step="1"
+                  value={videoSettings.reductionPercent}
+                  onChange={(event) => updateVideoSetting("reductionPercent", event.target.value)}
+                  disabled={!videoMetadata}
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Начать с, сек</span>
+                <input
+                  type="number"
+                  min="0"
+                  max={videoMetadata?.duration ?? undefined}
+                  step="0.01"
+                  value={videoSettings.startSecond}
+                  onChange={(event) => updateVideoSetting("startSecond", event.target.value)}
+                  disabled={!videoMetadata}
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Закончить на, сек</span>
+                <input
+                  type="number"
+                  min="0"
+                  max={videoMetadata?.duration ?? undefined}
+                  step="0.01"
+                  value={videoSettings.endSecond}
+                  onChange={(event) => updateVideoSetting("endSecond", event.target.value)}
+                  disabled={!videoMetadata}
+                  required
+                />
+              </label>
+            </div>
+
+            {isSaving ? (
+              <div className="loader-row">
+                <span className="loader" aria-hidden="true" />
+                <span>Видео загружается и обрабатывается...</span>
+              </div>
+            ) : null}
+
+            {error ? <p className="error-message">{error}</p> : null}
+
+            <div className="modal-actions">
+              <button className="ghost" type="button" onClick={closeVideoModal} disabled={isSaving}>
+                Отмена
+              </button>
+              <button className="primary" type="submit" disabled={isSaving || !videoFile || !videoMetadata}>
+                Загрузить
               </button>
             </div>
           </form>

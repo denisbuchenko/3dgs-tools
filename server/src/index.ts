@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import busboy from "busboy";
@@ -32,11 +34,26 @@ type ProjectImage = {
   createdAt: string;
 };
 
+type VideoFields = {
+  fps?: string;
+  scalePercent?: string;
+  startSecond?: string;
+  endSecond?: string;
+};
+
+type VideoOptions = {
+  fps: number;
+  scalePercent: number;
+  startSecond: number;
+  endSecond: number | null;
+};
+
 const port = Number(process.env.PORT) || 3000;
 const serverRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const projectsRoot = path.join(serverRoot, "projects");
 const metadataPath = path.join(projectsRoot, "projects.json");
-const maxUploadSize = 50 * 1024 * 1024;
+const maxImageUploadSize = 50 * 1024 * 1024;
+const maxVideoUploadSize = 2 * 1024 * 1024 * 1024;
 
 async function ensureStorage() {
   await mkdir(projectsRoot, { recursive: true });
@@ -162,6 +179,26 @@ function imageContentType(fileName: string) {
 
 function imageIdFromFileName(fileName: string) {
   return path.parse(fileName).name;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeVideoOptions(fields: VideoFields): VideoOptions {
+  const fps = Math.round(clamp(Number(fields.fps) || 1, 1, 30));
+  const scalePercent = clamp(Number(fields.scalePercent) || 100, 1, 100);
+  const startSecond = Math.max(0, Number(fields.startSecond) || 0);
+  const rawEndSecond = Number(fields.endSecond);
+  const endSecond =
+    Number.isFinite(rawEndSecond) && rawEndSecond > startSecond ? rawEndSecond : null;
+
+  return {
+    fps,
+    scalePercent,
+    startSecond,
+    endSecond,
+  };
 }
 
 async function ensureThumbnail(project: Project, fileName: string) {
@@ -301,6 +338,41 @@ async function deleteAllProjectImages(project: Project) {
   await ensureProjectMediaFolders(project);
 }
 
+function runFfmpeg(args: string[]) {
+  return new Promise<void>((resolve, reject) => {
+    const ffmpeg = spawn("ffmpeg", args);
+    let stderr = "";
+
+    ffmpeg.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(stderr.trim() || "ffmpeg не смог обработать видео."));
+    });
+  });
+}
+
+async function createThumbnailsForImages(project: Project, imageIds: string[]) {
+  const files = await readdir(getImagesFolder(project));
+
+  await Promise.all(
+    imageIds.map(async (imageId) => {
+      const fileName = files.find((file) => imageIdFromFileName(file) === imageId);
+
+      if (fileName) {
+        await ensureThumbnail(project, fileName);
+      }
+    })
+  );
+}
+
 async function uploadProjectImages(request: IncomingMessage, project: Project) {
   await ensureProjectMediaFolders(project);
 
@@ -309,7 +381,7 @@ async function uploadProjectImages(request: IncomingMessage, project: Project) {
   const parser = busboy({
     headers: request.headers,
     limits: {
-      fileSize: maxUploadSize,
+      fileSize: maxImageUploadSize,
       files: 100,
     },
   });
@@ -346,6 +418,106 @@ async function uploadProjectImages(request: IncomingMessage, project: Project) {
         .then(() => listProjectImages(project))
         .then(resolve)
         .catch(reject);
+    });
+
+    request.pipe(parser);
+  });
+}
+
+async function uploadProjectVideo(request: IncomingMessage, project: Project) {
+  await ensureProjectMediaFolders(project);
+
+  const fields: VideoFields = {};
+  const tempVideoPath = path.join(tmpdir(), `3dgs-video-${randomUUID()}`);
+  let hasVideo = false;
+  let originalName = "video";
+
+  const parser = busboy({
+    headers: request.headers,
+    limits: {
+      fileSize: maxVideoUploadSize,
+      files: 1,
+    },
+  });
+
+  return await new Promise<ProjectImage[]>((resolve, reject) => {
+    const uploads: Promise<void>[] = [];
+
+    parser.on("field", (name, value) => {
+      if (["fps", "scalePercent", "startSecond", "endSecond"].includes(name)) {
+        fields[name as keyof VideoFields] = value;
+      }
+    });
+
+    parser.on("file", (_fieldName, file, info) => {
+      if (!info.mimeType.startsWith("video/")) {
+        file.resume();
+        return;
+      }
+
+      hasVideo = true;
+      originalName = info.filename || originalName;
+      uploads.push(pipeline(file, createWriteStream(tempVideoPath)));
+    });
+
+    parser.on("error", reject);
+    parser.on("finish", () => {
+      Promise.all(uploads)
+        .then(async () => {
+          if (!hasVideo) {
+            throw new Error("Видео не выбрано.");
+          }
+
+          const options = normalizeVideoOptions(fields);
+          const startIndex = await nextImageIndex(project);
+          const outputPattern = path.join(getImagesFolder(project), "%04d.jpg");
+          const ffmpegArgs = [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            String(options.startSecond),
+            "-i",
+            tempVideoPath,
+          ];
+
+          if (options.endSecond !== null) {
+            ffmpegArgs.push("-t", String(options.endSecond - options.startSecond));
+          }
+
+          ffmpegArgs.push(
+            "-vf",
+            `fps=${options.fps},scale=max(2\\,trunc(iw*${options.scalePercent}/100/2)*2):max(2\\,trunc(ih*${options.scalePercent}/100/2)*2)`,
+            "-q:v",
+            "2",
+            "-start_number",
+            String(startIndex),
+            outputPattern
+          );
+
+          await runFfmpeg(ffmpegArgs);
+
+          const files = await readdir(getImagesFolder(project));
+          const createdIds = files
+            .map((file) => imageIdFromFileName(file))
+            .filter((id) => /^\d+$/.test(id) && Number(id) >= startIndex)
+            .sort((a, b) => a.localeCompare(b));
+
+          await createThumbnailsForImages(project, createdIds);
+          await rm(tempVideoPath, { force: true });
+
+          if (createdIds.length === 0) {
+            throw new Error(`Из видео "${originalName}" не удалось извлечь кадры.`);
+          }
+
+          return listProjectImages(project);
+        })
+        .then(resolve)
+        .catch(async (error: unknown) => {
+          await rm(tempVideoPath, { force: true });
+          reject(error);
+        });
     });
 
     request.pipe(parser);
@@ -407,6 +579,11 @@ function getProjectId(pathname: string) {
 
 function getProjectImagesRoute(pathname: string) {
   const match = pathname.match(/^\/api\/projects\/([^/]+)\/images$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectVideosRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/videos$/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -472,6 +649,7 @@ async function handleProjects(request: IncomingMessage, response: ServerResponse
   }
 
   const projectImagesId = getProjectImagesRoute(url.pathname);
+  const projectVideosId = getProjectVideosRoute(url.pathname);
 
   if (projectImagesId && request.method === "GET") {
     const { project } = await getProjectById(projectImagesId);
@@ -525,6 +703,27 @@ async function handleProjects(request: IncomingMessage, response: ServerResponse
       projects.map((item) => (item.id === project.id ? updatedProject : item))
     );
     sendNoContent(response);
+    return;
+  }
+
+  if (projectVideosId && request.method === "POST") {
+    const { project, projects } = await getProjectById(projectVideosId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    const images = await uploadProjectVideo(request, project);
+    const updatedProject = {
+      ...project,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await writeProjects(
+      projects.map((item) => (item.id === project.id ? updatedProject : item))
+    );
+    sendJson(response, 201, images);
     return;
   }
 
