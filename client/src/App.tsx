@@ -100,6 +100,12 @@ type ColmapResult = {
 
 const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
 const apiBaseUrl = `${apiOrigin}/api`;
+const defaultVideoSettings: VideoSettings = {
+  fps: "1",
+  reductionPercent: "0",
+  startSecond: "0",
+  endSecond: "",
+};
 
 async function requestProjects() {
   const response = await fetch(`${apiBaseUrl}/projects`);
@@ -150,7 +156,9 @@ async function deleteProject(id: string) {
 }
 
 async function requestProjectImages(projectId: string) {
-  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/images`);
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/images`, {
+    cache: "no-store",
+  });
 
   if (!response.ok) {
     throw new Error("Не удалось загрузить изображения.");
@@ -480,6 +488,9 @@ export default function App() {
     try {
       const uploadedImages = await uploadProjectImages(selectedProject.id, event.target.files);
       setImages(uploadedImages);
+      setLightboxImage(null);
+      setOpenImageMenuId(null);
+      setIsLightboxMenuOpen(false);
       setProjects((current) =>
         current.map((project) =>
           project.id === selectedProject.id
@@ -499,12 +510,16 @@ export default function App() {
     const file = event.target.files?.[0] ?? null;
     setVideoFile(file);
     setVideoMetadata(null);
-    setVideoSettings({
-      fps: "",
-      reductionPercent: "",
-      startSecond: "",
-      endSecond: "",
-    });
+    setVideoSettings(
+      file
+        ? defaultVideoSettings
+        : {
+            fps: "",
+            reductionPercent: "",
+            startSecond: "",
+            endSecond: "",
+          }
+    );
     setError("");
 
     if (!file) {
@@ -534,7 +549,7 @@ export default function App() {
       URL.revokeObjectURL(objectUrl);
     };
     video.onerror = () => {
-      setError("Не удалось прочитать метаданные видео.");
+      setError("");
       URL.revokeObjectURL(objectUrl);
     };
   }
@@ -565,21 +580,26 @@ export default function App() {
   async function handleUploadVideo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedProject || !videoFile || !videoMetadata) {
+    if (!selectedProject || !videoFile) {
       return;
     }
 
     const startSecond = Number(videoSettings.startSecond);
-    const endSecond = Number(videoSettings.endSecond);
+    const endSecond = videoSettings.endSecond === "" ? null : Number(videoSettings.endSecond);
 
     if (
       !Number.isFinite(startSecond) ||
-      !Number.isFinite(endSecond) ||
       startSecond < 0 ||
-      endSecond <= startSecond ||
-      endSecond > videoMetadata.duration
+      (endSecond !== null &&
+        (!Number.isFinite(endSecond) ||
+          endSecond <= startSecond ||
+          (videoMetadata !== null && endSecond > videoMetadata.duration)))
     ) {
-      setError("Проверьте диапазон секунд: он должен быть внутри длительности видео.");
+      setError(
+        videoMetadata
+          ? "Проверьте диапазон секунд: он должен быть внутри длительности видео."
+          : "Проверьте диапазон секунд: конец должен быть больше начала."
+      );
       return;
     }
 
@@ -589,6 +609,9 @@ export default function App() {
     try {
       const uploadedImages = await uploadProjectVideo(selectedProject.id, videoFile, videoSettings);
       setImages(uploadedImages);
+      setLightboxImage(null);
+      setOpenImageMenuId(null);
+      setIsLightboxMenuOpen(false);
       setProjects((current) =>
         current.map((project) =>
           project.id === selectedProject.id
@@ -1127,7 +1150,7 @@ export default function App() {
               <input
                 ref={videoInputRef}
                 type="file"
-                accept="video/*"
+                accept="video/*,.mov,video/quicktime"
                 onChange={handleVideoFileChange}
                 required
               />
@@ -1141,7 +1164,9 @@ export default function App() {
                 </span>
               </div>
             ) : (
-              <p className="side-note">Выберите видео, чтобы заполнить параметры обработки.</p>
+              <p className="side-note">
+                Если браузер не прочитал метаданные MOV, сервер обработает видео через ffmpeg.
+              </p>
             )}
 
             <div className="settings-grid">
@@ -1154,7 +1179,7 @@ export default function App() {
                   step="1"
                   value={videoSettings.fps}
                   onChange={(event) => updateVideoSetting("fps", event.target.value)}
-                  disabled={!videoMetadata}
+                  disabled={!videoFile}
                   required
                 />
               </label>
@@ -1168,7 +1193,7 @@ export default function App() {
                   step="1"
                   value={videoSettings.reductionPercent}
                   onChange={(event) => updateVideoSetting("reductionPercent", event.target.value)}
-                  disabled={!videoMetadata}
+                  disabled={!videoFile}
                   required
                 />
               </label>
@@ -1182,7 +1207,7 @@ export default function App() {
                   step="0.01"
                   value={videoSettings.startSecond}
                   onChange={(event) => updateVideoSetting("startSecond", event.target.value)}
-                  disabled={!videoMetadata}
+                  disabled={!videoFile}
                   required
                 />
               </label>
@@ -1196,8 +1221,7 @@ export default function App() {
                   step="0.01"
                   value={videoSettings.endSecond}
                   onChange={(event) => updateVideoSetting("endSecond", event.target.value)}
-                  disabled={!videoMetadata}
-                  required
+                  disabled={!videoFile}
                 />
               </label>
             </div>
@@ -1215,7 +1239,7 @@ export default function App() {
               <button className="ghost" type="button" onClick={closeVideoModal} disabled={isSaving}>
                 Отмена
               </button>
-              <button className="primary" type="submit" disabled={isSaving || !videoFile || !videoMetadata}>
+              <button className="primary" type="submit" disabled={isSaving || !videoFile}>
                 Загрузить
               </button>
             </div>

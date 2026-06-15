@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,10 +10,10 @@ import busboy from "busboy";
 import {
   ensureProjectMediaFolders,
   ensureThumbnail,
+  deleteAllProjectImages,
   getImagesFolder,
   imageIdFromFileName,
   listProjectImages,
-  nextImageIndex,
 } from "./media.js";
 import type { Project, ProjectImage } from "./types.js";
 
@@ -32,6 +32,8 @@ type VideoOptions = {
 };
 
 const maxVideoUploadSize = 2 * 1024 * 1024 * 1024;
+const supportedVideoExtensions = new Set([".mov"]);
+const supportedVideoMimeTypes = new Set(["video/quicktime", "video/x-quicktime"]);
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -51,6 +53,16 @@ function normalizeVideoOptions(fields: VideoFields): VideoOptions {
     startSecond,
     endSecond,
   };
+}
+
+function isSupportedVideoUpload(mimeType: string, filename: string) {
+  const extension = path.extname(filename).toLowerCase();
+
+  return (
+    mimeType.startsWith("video/") ||
+    supportedVideoMimeTypes.has(mimeType.toLowerCase()) ||
+    supportedVideoExtensions.has(extension)
+  );
 }
 
 function runFfmpeg(args: string[]) {
@@ -95,7 +107,9 @@ export async function uploadProjectVideo(
   await ensureProjectMediaFolders(project);
 
   const fields: VideoFields = {};
-  const tempVideoPath = path.join(tmpdir(), `3dgs-video-${randomUUID()}`);
+  const uploadId = randomUUID();
+  const tempVideoPath = path.join(tmpdir(), `3dgs-video-${uploadId}`);
+  const tempFramesFolder = path.join(tmpdir(), `3dgs-video-frames-${uploadId}`);
   let hasVideo = false;
   let originalName = "video";
 
@@ -117,7 +131,7 @@ export async function uploadProjectVideo(
     });
 
     parser.on("file", (_fieldName, file, info) => {
-      if (!info.mimeType.startsWith("video/")) {
+      if (!isSupportedVideoUpload(info.mimeType, info.filename)) {
         file.resume();
         return;
       }
@@ -136,8 +150,7 @@ export async function uploadProjectVideo(
           }
 
           const options = normalizeVideoOptions(fields);
-          const startIndex = await nextImageIndex(project);
-          const outputPattern = path.join(getImagesFolder(project), "%04d.jpg");
+          await mkdir(tempFramesFolder, { recursive: true });
           const ffmpegArgs = [
             "-hide_banner",
             "-loglevel",
@@ -159,30 +172,38 @@ export async function uploadProjectVideo(
             "-q:v",
             "2",
             "-start_number",
-            String(startIndex),
-            outputPattern
+            "1",
+            path.join(tempFramesFolder, `${uploadId}-%04d.jpg`)
           );
 
           await runFfmpeg(ffmpegArgs);
 
-          const files = await readdir(getImagesFolder(project));
+          const files = await readdir(tempFramesFolder);
           const createdIds = files
             .map((file) => imageIdFromFileName(file))
-            .filter((id) => /^\d+$/.test(id) && Number(id) >= startIndex)
+            .filter((id) => id.startsWith(`${uploadId}-`))
             .sort((a, b) => a.localeCompare(b));
-
-          await createThumbnailsForImages(project, createdIds);
-          await rm(tempVideoPath, { force: true });
 
           if (createdIds.length === 0) {
             throw new Error(`Из видео "${originalName}" не удалось извлечь кадры.`);
           }
+
+          await deleteAllProjectImages(project);
+          await Promise.all(
+            files.map((fileName) =>
+              rename(path.join(tempFramesFolder, fileName), path.join(getImagesFolder(project), fileName))
+            )
+          );
+          await createThumbnailsForImages(project, createdIds);
+          await rm(tempVideoPath, { force: true });
+          await rm(tempFramesFolder, { force: true, recursive: true });
 
           return listProjectImages(project);
         })
         .then(resolve)
         .catch(async (error: unknown) => {
           await rm(tempVideoPath, { force: true });
+          await rm(tempFramesFolder, { force: true, recursive: true });
           reject(error);
         });
     });

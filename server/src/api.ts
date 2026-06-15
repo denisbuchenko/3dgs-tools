@@ -27,7 +27,10 @@ function sendJson(response: ServerResponse, status: number, body: unknown) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
     "Content-Type": "application/json",
+    "Expires": "0",
+    "Pragma": "no-cache",
   });
   response.end(JSON.stringify(body));
 }
@@ -37,6 +40,9 @@ function sendNoContent(response: ServerResponse) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
+    "Expires": "0",
+    "Pragma": "no-cache",
   });
   response.end();
 }
@@ -354,7 +360,7 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
       return;
     }
 
-    sendFile(response, image.path, image.contentType, image.size);
+    sendFile(response, image.path, image.contentType, image.size, "no-store");
     return;
   }
 

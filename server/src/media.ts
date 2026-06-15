@@ -23,12 +23,22 @@ export async function ensureProjectMediaFolders(project: Project) {
   await mkdir(getThumbnailsFolder(project), { recursive: true });
 }
 
-export function sendFile(response: ServerResponse, filePath: string, contentType: string, size: number) {
+export function sendFile(
+  response: ServerResponse,
+  filePath: string,
+  contentType: string,
+  size: number,
+  cacheControl = "public, max-age=31536000, immutable"
+) {
+  const noStoreHeaders =
+    cacheControl === "no-store" ? { "Expires": "0", "Pragma": "no-cache" } : {};
+
   response.writeHead(200, {
     "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cache-Control": cacheControl,
     "Content-Length": size,
     "Content-Type": contentType,
+    ...noStoreHeaders,
   });
   createReadStream(filePath).pipe(response);
 }
@@ -57,6 +67,10 @@ export function imageContentType(fileName: string) {
 
 export function imageIdFromFileName(fileName: string) {
   return path.parse(fileName).name;
+}
+
+function isSafeImageId(imageId: string) {
+  return /^[a-z0-9-]+$/i.test(imageId);
 }
 
 export async function ensureThumbnail(project: Project, fileName: string) {
@@ -100,13 +114,16 @@ export async function listProjectImages(project: Project): Promise<ProjectImage[
         const filePath = path.join(getImagesFolder(project), fileName);
         const fileStat = await stat(filePath);
         const id = imageIdFromFileName(fileName);
+        const thumbnailStat = await stat(path.join(getThumbnailsFolder(project), `${id}.webp`));
+        const originalVersion = `${Math.round(fileStat.mtimeMs)}-${fileStat.size}`;
+        const thumbnailVersion = `${Math.round(thumbnailStat.mtimeMs)}-${thumbnailStat.size}`;
 
         return {
           id,
           fileName,
           thumbnailName: `${id}.webp`,
-          originalUrl: `/api/projects/${encodeURIComponent(project.id)}/images/${id}/original`,
-          thumbnailUrl: `/api/projects/${encodeURIComponent(project.id)}/images/${id}/thumbnail`,
+          originalUrl: `/api/projects/${encodeURIComponent(project.id)}/images/${id}/original?v=${originalVersion}`,
+          thumbnailUrl: `/api/projects/${encodeURIComponent(project.id)}/images/${id}/thumbnail?v=${thumbnailVersion}`,
           size: fileStat.size,
           createdAt: fileStat.birthtime.toISOString(),
         };
@@ -123,7 +140,7 @@ export async function resolveImagePath(
 ) {
   await ensureProjectMediaFolders(project);
 
-  if (!/^\d+$/.test(imageId)) {
+  if (!isSafeImageId(imageId)) {
     return null;
   }
 
@@ -167,7 +184,7 @@ export async function resolveImagePath(
 export async function deleteProjectImage(project: Project, imageId: string) {
   await ensureProjectMediaFolders(project);
 
-  if (!/^\d+$/.test(imageId)) {
+  if (!isSafeImageId(imageId)) {
     return false;
   }
 
