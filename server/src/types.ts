@@ -68,3 +68,17 @@ export type ColmapJobSnapshot = {
     ply: string;
   };
 };
+
+export type ColmapCameraPose = {
+  id: number;
+  name: string;
+  cameraId: number;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+};
+
+export type ColmapResult = {
+  hasResult: boolean;
+  plyUrl: string | null;
+  cameras: ColmapCameraPose[];
+};

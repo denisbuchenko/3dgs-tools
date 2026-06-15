@@ -1,4 +1,18 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ViewerCameraPose } from "./viewer/PointCloudViewer";
+
+const PointCloudViewer = lazy(() =>
+  import("./viewer/PointCloudViewer").then((module) => ({ default: module.PointCloudViewer }))
+);
 
 type Project = {
   id: string;
@@ -76,6 +90,12 @@ type ColmapJob = {
     text: string;
     ply: string;
   };
+};
+
+type ColmapResult = {
+  hasResult: boolean;
+  plyUrl: string | null;
+  cameras: ViewerCameraPose[];
 };
 
 const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
@@ -237,6 +257,16 @@ async function startColmap(projectId: string, settings: ColmapSettings) {
   return (await response.json()) as ColmapJob;
 }
 
+async function requestColmapResult(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/colmap/result`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось получить результат COLMAP.");
+  }
+
+  return (await response.json()) as ColmapResult;
+}
+
 function mediaUrl(url: string) {
   return `${apiOrigin}${url}`;
 }
@@ -264,6 +294,8 @@ export default function App() {
   });
   const [colmapSettings, setColmapSettings] = useState<ColmapSettings | null>(null);
   const [colmapJob, setColmapJob] = useState<ColmapJob | null>(null);
+  const [colmapResult, setColmapResult] = useState<ColmapResult | null>(null);
+  const [isResultOpen, setIsResultOpen] = useState(false);
   const [isColmapLoading, setIsColmapLoading] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [logScrollTop, setLogScrollTop] = useState(0);
@@ -316,6 +348,8 @@ export default function App() {
     setIsVideoModalOpen(false);
     setColmapSettings(null);
     setColmapJob(null);
+    setColmapResult(null);
+    setIsResultOpen(false);
 
     requestProjectImages(selectedId)
       .then(setImages)
@@ -332,6 +366,10 @@ export default function App() {
 
     requestColmapJob(selectedId)
       .then(setColmapJob)
+      .catch(() => undefined);
+
+    requestColmapResult(selectedId)
+      .then(setColmapResult)
       .catch(() => undefined);
   }, [selectedId]);
 
@@ -360,6 +398,16 @@ export default function App() {
     logViewportRef.current.scrollTop = nextScrollTop;
     setLogScrollTop(nextScrollTop);
   }, [isLogsOpen, colmapLogs.length]);
+
+  useEffect(() => {
+    if (!selectedId || colmapJob?.status !== "done") {
+      return;
+    }
+
+    requestColmapResult(selectedId)
+      .then(setColmapResult)
+      .catch(() => undefined);
+  }, [colmapJob?.status, selectedId]);
 
   async function handleSubmitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -619,6 +667,7 @@ export default function App() {
     try {
       const job = await startColmap(selectedProject.id, colmapSettings);
       setColmapJob(job);
+      setColmapResult(null);
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : "Ошибка запуска COLMAP.");
     } finally {
@@ -629,6 +678,7 @@ export default function App() {
   const isModalOpen = modalMode !== null;
   const modalProject = modalMode === "edit" ? selectedProject : null;
   const visibleImages = isGalleryExpanded ? images : images.slice(0, 4);
+  const resultPlyUrl = colmapResult?.plyUrl ? mediaUrl(colmapResult.plyUrl) : null;
 
   return (
     <main className="workspace">
@@ -810,6 +860,14 @@ export default function App() {
                       disabled={colmapLogs.length === 0}
                     >
                       Показать логи
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => setIsResultOpen(true)}
+                      disabled={!resultPlyUrl || !colmapResult?.hasResult}
+                    >
+                      Посмотреть результат
                     </button>
                   </div>
                 </div>
@@ -1192,6 +1250,28 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isResultOpen && resultPlyUrl && colmapResult ? (
+        <div className="modal-backdrop result-backdrop" role="presentation">
+          <div className="result-modal" aria-label="Результат COLMAP">
+            <header className="result-toolbar">
+              <h2>Результат COLMAP</h2>
+              <button className="close-button" type="button" onClick={() => setIsResultOpen(false)}>
+                Закрыть
+              </button>
+            </header>
+            <Suspense
+              fallback={
+                <div className="point-viewer">
+                  <div className="viewer-loading">Загрузка viewer...</div>
+                </div>
+              }
+            >
+              <PointCloudViewer plyUrl={resultPlyUrl} cameras={colmapResult.cameras} />
+            </Suspense>
           </div>
         </div>
       ) : null}

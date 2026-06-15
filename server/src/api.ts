@@ -3,7 +3,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { uploadProjectImages } from "./imLoader.js";
-import { getColmapJob, getDefaultColmapSettings, startColmapJob } from "./colmap.js";
+import {
+  getColmapJob,
+  getColmapResult,
+  getDefaultColmapSettings,
+  resolveColmapPly,
+  startColmapJob,
+} from "./colmap.js";
 import {
   deleteAllProjectImages,
   deleteProjectImage,
@@ -124,6 +130,16 @@ function getProjectColmapDefaultsRoute(pathname: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getProjectColmapResultRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/result$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectColmapPlyRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/points\.ply$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function getProjectImageFileRoute(pathname: string) {
   const match = pathname.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/(original|thumbnail)$/);
 
@@ -189,6 +205,8 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
   const projectVideosId = getProjectVideosRoute(url.pathname);
   const projectColmapId = getProjectColmapRoute(url.pathname);
   const projectColmapDefaultsId = getProjectColmapDefaultsRoute(url.pathname);
+  const projectColmapResultId = getProjectColmapResultRoute(url.pathname);
+  const projectColmapPlyId = getProjectColmapPlyRoute(url.pathname);
 
   if (projectColmapDefaultsId && request.method === "GET") {
     sendJson(response, 200, getDefaultColmapSettings());
@@ -211,6 +229,31 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
     const body = (await readBody(request)) as { settings?: unknown };
     const job = startColmapJob(project, (body.settings ?? {}) as Parameters<typeof startColmapJob>[1]);
     sendJson(response, 202, job);
+    return;
+  }
+
+  if (projectColmapResultId && request.method === "GET") {
+    const { project } = await getProjectById(projectColmapResultId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    sendJson(response, 200, await getColmapResult(project));
+    return;
+  }
+
+  if (projectColmapPlyId && request.method === "GET") {
+    const { project } = await getProjectById(projectColmapPlyId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    const ply = await resolveColmapPly(project);
+    sendFile(response, ply.path, "model/ply", ply.size);
     return;
   }
 
