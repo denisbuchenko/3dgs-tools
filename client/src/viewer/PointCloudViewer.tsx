@@ -21,6 +21,13 @@ type PointCloudViewerProps = {
   cameras: ViewerCameraPose[];
 };
 
+const fallbackColmapToViewer = new THREE.Matrix4().set(
+  1, 0, 0, 0,
+  0, 0, 1, 0,
+  0, -1, 0, 0,
+  0, 0, 0, 1
+);
+
 async function createRenderer(canvas: HTMLCanvasElement): Promise<{
   renderer: ViewerRenderer;
   mode: RendererMode;
@@ -50,7 +57,66 @@ async function createRenderer(canvas: HTMLCanvasElement): Promise<{
   };
 }
 
-function addCameraHelpers(scene: THREE.Object3D, cameras: ViewerCameraPose[]) {
+function imageUpFromPose(cameraPose: ViewerCameraPose) {
+  return new THREE.Vector3(0, -1, 0)
+    .applyQuaternion(new THREE.Quaternion().fromArray(cameraPose.rotation))
+    .normalize();
+}
+
+function imageRightFromPose(cameraPose: ViewerCameraPose) {
+  return new THREE.Vector3(1, 0, 0)
+    .applyQuaternion(new THREE.Quaternion().fromArray(cameraPose.rotation))
+    .normalize();
+}
+
+function perpendicularTo(vector: THREE.Vector3) {
+  const reference = Math.abs(vector.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+
+  return reference.cross(vector).normalize();
+}
+
+function createColmapToViewer(cameras: ViewerCameraPose[]) {
+  if (cameras.length === 0) {
+    return fallbackColmapToViewer.clone();
+  }
+
+  const up = new THREE.Vector3();
+  const right = new THREE.Vector3();
+
+  for (const cameraPose of cameras) {
+    up.add(imageUpFromPose(cameraPose));
+    right.add(imageRightFromPose(cameraPose));
+  }
+
+  if (up.lengthSq() < 0.0001) {
+    return fallbackColmapToViewer.clone();
+  }
+
+  up.normalize();
+  right.addScaledVector(up, -right.dot(up));
+
+  if (right.lengthSq() < 0.0001) {
+    right.copy(perpendicularTo(up));
+  } else {
+    right.normalize();
+  }
+
+  const depth = new THREE.Vector3().crossVectors(up, right).normalize();
+
+  return new THREE.Matrix4().set(
+    right.x, right.y, right.z, 0,
+    depth.x, depth.y, depth.z, 0,
+    up.x, up.y, up.z, 0,
+    0, 0, 0, 1
+  );
+}
+
+function addCameraHelpers(
+  scene: THREE.Object3D,
+  cameras: ViewerCameraPose[],
+  center: THREE.Vector3,
+  colmapToViewer: THREE.Matrix4
+) {
   const material = new THREE.LineBasicMaterial({ color: 0x2f6f8f });
   const geometry = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
@@ -68,11 +134,27 @@ function addCameraHelpers(scene: THREE.Object3D, cameras: ViewerCameraPose[]) {
 
   for (const cameraPose of cameras) {
     const helper = new THREE.Line(geometry, material);
-    helper.position.fromArray(cameraPose.position);
-    helper.quaternion.fromArray(cameraPose.rotation);
+    const position = new THREE.Vector3().fromArray(cameraPose.position).sub(center);
+    position.applyMatrix4(colmapToViewer);
+
+    const rotation = new THREE.Quaternion().fromArray(cameraPose.rotation);
+    const cameraMatrix = new THREE.Matrix4().compose(
+      new THREE.Vector3().fromArray(cameraPose.position),
+      rotation,
+      new THREE.Vector3(1, 1, 1)
+    );
+    cameraMatrix.premultiply(colmapToViewer);
+
+    helper.position.copy(position);
+    helper.quaternion.setFromRotationMatrix(cameraMatrix);
     helper.scale.setScalar(0.35);
     scene.add(helper);
   }
+
+  return () => {
+    geometry.dispose();
+    material.dispose();
+  };
 }
 
 function percentile(sorted: number[], ratio: number) {
@@ -132,6 +214,18 @@ function computeRobustBounds(geometry: THREE.BufferGeometry, cameras: ViewerCame
   return { center, radius, pointRadius };
 }
 
+function createViewerGeometry(
+  geometry: THREE.BufferGeometry,
+  center: THREE.Vector3,
+  colmapToViewer: THREE.Matrix4
+) {
+  const viewerGeometry = geometry.clone();
+  viewerGeometry.translate(-center.x, -center.y, -center.z);
+  viewerGeometry.applyMatrix4(colmapToViewer);
+
+  return viewerGeometry;
+}
+
 export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<RendererMode>("webgl");
@@ -155,7 +249,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       scene.background = new THREE.Color(0x000000);
 
       const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 10000);
-      camera.position.set(0, -4, 2);
+      camera.up.set(0, 0, 1);
 
       const renderSetup = await createRenderer(targetCanvas);
       renderer = renderSetup.renderer;
@@ -164,6 +258,10 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
 
       controls = new OrbitControls(camera, targetCanvas);
       controls.enableDamping = true;
+      controls.screenSpacePanning = true;
+      controls.minPolarAngle = 0.02;
+      controls.maxPolarAngle = Math.PI - 0.02;
+      controls.zoomToCursor = true;
 
       const loader = new PLYLoader();
       const geometry = await loader.loadAsync(plyUrl);
@@ -174,7 +272,8 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       }
 
       const { center, radius, pointRadius } = computeRobustBounds(geometry, cameras);
-      geometry.translate(-center.x, -center.y, -center.z);
+      const colmapToViewer = createColmapToViewer(cameras);
+      const viewerGeometry = createViewerGeometry(geometry, center, colmapToViewer);
 
       const hasColor = Boolean(geometry.getAttribute("color"));
       const material = new THREE.PointsMaterial({
@@ -183,19 +282,18 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         vertexColors: hasColor,
         color: hasColor ? 0xffffff : 0x1d1f23,
       });
-      const points = new THREE.Points(geometry, material);
+      const points = new THREE.Points(viewerGeometry, material);
       scene.add(points);
 
-      const cameraGroup = new THREE.Group();
-      cameraGroup.position.set(-center.x, -center.y, -center.z);
-      addCameraHelpers(cameraGroup, cameras);
-      scene.add(cameraGroup);
+      const disposeCameraHelpers = addCameraHelpers(scene, cameras, center, colmapToViewer);
 
-      camera.position.set(0, -radius * 2.6, radius * 1.2);
+      camera.position.set(radius * 1.6, -radius * 2.2, radius * 1.2);
       camera.near = Math.max(radius / 1000, 0.001);
       camera.far = Math.max(radius * 100, 1000);
+      camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
       controls.target.set(0, 0, 0);
+      controls.update();
 
       const resize = () => {
         if (!renderer || !targetCanvas.parentElement) {
@@ -226,7 +324,9 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       return () => {
         window.removeEventListener("resize", resize);
         geometry.dispose();
+        viewerGeometry.dispose();
         material.dispose();
+        disposeCameraHelpers();
       };
     }
 
