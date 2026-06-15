@@ -54,16 +54,16 @@ function addCameraHelpers(scene: THREE.Object3D, cameras: ViewerCameraPose[]) {
   const material = new THREE.LineBasicMaterial({ color: 0x2f6f8f });
   const geometry = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(-0.18, -0.12, -0.3),
-    new THREE.Vector3(0.18, -0.12, -0.3),
+    new THREE.Vector3(-0.18, -0.12, 0.3),
+    new THREE.Vector3(0.18, -0.12, 0.3),
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0.18, 0.12, -0.3),
-    new THREE.Vector3(-0.18, 0.12, -0.3),
+    new THREE.Vector3(0.18, 0.12, 0.3),
+    new THREE.Vector3(-0.18, 0.12, 0.3),
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(-0.18, -0.12, -0.3),
-    new THREE.Vector3(-0.18, 0.12, -0.3),
-    new THREE.Vector3(0.18, 0.12, -0.3),
-    new THREE.Vector3(0.18, -0.12, -0.3),
+    new THREE.Vector3(-0.18, -0.12, 0.3),
+    new THREE.Vector3(-0.18, 0.12, 0.3),
+    new THREE.Vector3(0.18, 0.12, 0.3),
+    new THREE.Vector3(0.18, -0.12, 0.3),
   ]);
 
   for (const cameraPose of cameras) {
@@ -73,6 +73,63 @@ function addCameraHelpers(scene: THREE.Object3D, cameras: ViewerCameraPose[]) {
     helper.scale.setScalar(0.35);
     scene.add(helper);
   }
+}
+
+function percentile(sorted: number[], ratio: number) {
+  if (sorted.length === 0) {
+    return 0;
+  }
+
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
+}
+
+function computeRobustBounds(geometry: THREE.BufferGeometry, cameras: ViewerCameraPose[]) {
+  const positions = geometry.getAttribute("position");
+
+  if (!positions) {
+    const center = new THREE.Vector3();
+    return { center, radius: 1, pointRadius: 1 };
+  }
+
+  const step = Math.max(1, Math.floor(positions.count / 20000));
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+
+  for (let index = 0; index < positions.count; index += step) {
+    xs.push(positions.getX(index));
+    ys.push(positions.getY(index));
+    zs.push(positions.getZ(index));
+  }
+
+  xs.sort((a, b) => a - b);
+  ys.sort((a, b) => a - b);
+  zs.sort((a, b) => a - b);
+
+  const center = new THREE.Vector3(percentile(xs, 0.5), percentile(ys, 0.5), percentile(zs, 0.5));
+  const distances: number[] = [];
+
+  for (let index = 0; index < positions.count; index += step) {
+    distances.push(
+      Math.hypot(
+        positions.getX(index) - center.x,
+        positions.getY(index) - center.y,
+        positions.getZ(index) - center.z
+      )
+    );
+  }
+
+  distances.sort((a, b) => a - b);
+
+  const pointRadius = Math.max(percentile(distances, 0.98), 1);
+  const cameraRadius = cameras.reduce((current, cameraPose) => {
+    const cameraPosition = new THREE.Vector3().fromArray(cameraPose.position);
+
+    return Math.max(current, cameraPosition.distanceTo(center));
+  }, 0);
+  const radius = Math.max(pointRadius, cameraRadius * 1.15, 1);
+
+  return { center, radius, pointRadius };
 }
 
 export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
@@ -116,14 +173,12 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         return;
       }
 
-      geometry.computeBoundingSphere();
-      const center = geometry.boundingSphere?.center ?? new THREE.Vector3();
-      const radius = geometry.boundingSphere?.radius || 1;
+      const { center, radius, pointRadius } = computeRobustBounds(geometry, cameras);
       geometry.translate(-center.x, -center.y, -center.z);
 
       const hasColor = Boolean(geometry.getAttribute("color"));
       const material = new THREE.PointsMaterial({
-        size: Math.max(radius / 700, 0.004),
+        size: Math.max(pointRadius / 700, 0.004),
         sizeAttenuation: true,
         vertexColors: hasColor,
         color: hasColor ? 0xffffff : 0x1d1f23,

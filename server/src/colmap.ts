@@ -447,11 +447,12 @@ export async function getColmapResult(project: Project): Promise<ColmapResult> {
   const plyPath = path.join(getProjectFolder(project), "colmap", "points.ply");
 
   try {
-    await stat(plyPath);
+    const plyStat = await stat(plyPath);
+    const plyVersion = `${Math.round(plyStat.mtimeMs)}-${plyStat.size}`;
 
     return {
       hasResult: true,
-      plyUrl: `/api/projects/${encodeURIComponent(project.id)}/colmap/points.ply`,
+      plyUrl: `/api/projects/${encodeURIComponent(project.id)}/colmap/points.ply?v=${plyVersion}`,
       cameras: await readCameraPoses(project),
     };
   } catch {

@@ -259,7 +259,7 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
     }
 
     const ply = await resolveColmapPly(project);
-    sendFile(response, ply.path, "model/ply", ply.size);
+    sendFile(response, ply.path, "model/ply", ply.size, "no-store");
     return;
   }
 
