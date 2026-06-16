@@ -11,6 +11,14 @@ import {
   startColmapJob,
 } from "./colmap.js";
 import {
+  getDefaultGsplatSettings,
+  getGsplatJob,
+  getGsplatResult,
+  getGsplatTrainerStatus,
+  resolveGsplatPly,
+  startGsplatJob,
+} from "./gsplat.js";
+import {
   deleteAllProjectImages,
   deleteProjectImage,
   ensureProjectMediaFolders,
@@ -146,6 +154,31 @@ function getProjectColmapPlyRoute(pathname: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getProjectGsplatRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectGsplatDefaultsRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/defaults$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectGsplatStatusRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/status$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectGsplatResultRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/result$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getProjectGsplatPlyRoute(pathname: string) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/splats\.ply$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function getProjectImageFileRoute(pathname: string) {
   const match = pathname.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/(original|thumbnail)$/);
 
@@ -213,6 +246,11 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
   const projectColmapDefaultsId = getProjectColmapDefaultsRoute(url.pathname);
   const projectColmapResultId = getProjectColmapResultRoute(url.pathname);
   const projectColmapPlyId = getProjectColmapPlyRoute(url.pathname);
+  const projectGsplatId = getProjectGsplatRoute(url.pathname);
+  const projectGsplatDefaultsId = getProjectGsplatDefaultsRoute(url.pathname);
+  const projectGsplatStatusId = getProjectGsplatStatusRoute(url.pathname);
+  const projectGsplatResultId = getProjectGsplatResultRoute(url.pathname);
+  const projectGsplatPlyId = getProjectGsplatPlyRoute(url.pathname);
 
   if (projectColmapDefaultsId && request.method === "GET") {
     sendJson(response, 200, getDefaultColmapSettings());
@@ -259,6 +297,60 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
     }
 
     const ply = await resolveColmapPly(project);
+    sendFile(response, ply.path, "model/ply", ply.size, "no-store");
+    return;
+  }
+
+  if (projectGsplatDefaultsId && request.method === "GET") {
+    sendJson(response, 200, getDefaultGsplatSettings());
+    return;
+  }
+
+  if (projectGsplatStatusId && request.method === "GET") {
+    sendJson(response, 200, await getGsplatTrainerStatus());
+    return;
+  }
+
+  if (projectGsplatId && request.method === "GET") {
+    sendJson(response, 200, getGsplatJob(projectGsplatId));
+    return;
+  }
+
+  if (projectGsplatId && request.method === "POST") {
+    const { project } = await getProjectById(projectGsplatId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    const body = (await readBody(request)) as { settings?: unknown };
+    const job = startGsplatJob(project, (body.settings ?? {}) as Parameters<typeof startGsplatJob>[1]);
+    sendJson(response, 202, job);
+    return;
+  }
+
+  if (projectGsplatResultId && request.method === "GET") {
+    const { project } = await getProjectById(projectGsplatResultId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    sendJson(response, 200, await getGsplatResult(project));
+    return;
+  }
+
+  if (projectGsplatPlyId && request.method === "GET") {
+    const { project } = await getProjectById(projectGsplatPlyId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return;
+    }
+
+    const ply = await resolveGsplatPly(project);
     sendFile(response, ply.path, "model/ply", ply.size, "no-store");
     return;
   }

@@ -82,3 +82,59 @@ export type ColmapResult = {
   plyUrl: string | null;
   cameras: ColmapCameraPose[];
 };
+
+export type GsplatQuality = "draft" | "balanced" | "high";
+export type GsplatBackground = "black" | "white" | "random";
+
+export type GsplatSettings = {
+  quality: GsplatQuality;
+  background: GsplatBackground;
+  useGpu: boolean;
+  gpuIndex: string;
+  maxSteps: number;
+  resolution: number;
+  shDegree: number;
+  downscaleFactor: number;
+  densificationInterval: number;
+  opacityRegularization: number;
+};
+
+export type GsplatTrainerStatus = {
+  available: boolean;
+  backend: "custom" | "nerfstudio" | null;
+  command: string | null;
+  message: string;
+  startedAt: string | null;
+};
+
+export type GsplatStepStatus = "pending" | "running" | "done" | "failed";
+
+export type GsplatStep = {
+  id: string;
+  label: string;
+  status: GsplatStepStatus;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
+export type GsplatJobStatus = "idle" | "running" | "done" | "failed";
+
+export type GsplatJobSnapshot = {
+  projectId: string;
+  status: GsplatJobStatus;
+  settings: GsplatSettings;
+  steps: GsplatStep[];
+  logs: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  output?: {
+    workspace: string;
+    ply: string;
+  };
+};
+
+export type GsplatResult = {
+  hasResult: boolean;
+  plyUrl: string | null;
+};

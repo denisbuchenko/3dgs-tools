@@ -98,6 +98,59 @@ type ColmapResult = {
   cameras: ViewerCameraPose[];
 };
 
+type GsplatQuality = "draft" | "balanced" | "high";
+type GsplatBackground = "black" | "white" | "random";
+
+type GsplatSettings = {
+  quality: GsplatQuality;
+  background: GsplatBackground;
+  useGpu: boolean;
+  gpuIndex: string;
+  maxSteps: number;
+  resolution: number;
+  shDegree: number;
+  downscaleFactor: number;
+  densificationInterval: number;
+  opacityRegularization: number;
+};
+
+type GsplatStep = {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "done" | "failed";
+};
+
+type GsplatJob = {
+  projectId: string;
+  status: "idle" | "running" | "done" | "failed";
+  settings: GsplatSettings;
+  steps: GsplatStep[];
+  logs: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  output?: {
+    workspace: string;
+    ply: string;
+  };
+};
+
+type GsplatResult = {
+  hasResult: boolean;
+  plyUrl: string | null;
+};
+
+type GsplatTrainerStatus = {
+  available: boolean;
+  backend: "custom" | "nerfstudio" | null;
+  command: string | null;
+  message: string;
+  startedAt: string | null;
+};
+
+type LogMode = "colmap" | "gsplat";
+type ResultMode = "colmap" | "gsplat";
+
 const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
 const apiBaseUrl = `${apiOrigin}/api`;
 const defaultVideoSettings: VideoSettings = {
@@ -106,6 +159,24 @@ const defaultVideoSettings: VideoSettings = {
   startSecond: "0",
   endSecond: "",
 };
+
+function formatElapsedTime(startedAt: string, nowMs: number) {
+  const startedMs = Date.parse(startedAt);
+
+  if (!Number.isFinite(startedMs)) {
+    return null;
+  }
+
+  const totalSeconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds} сек`;
+  }
+
+  return `${minutes} мин ${seconds.toString().padStart(2, "0")} сек`;
+}
 
 async function requestProjects() {
   const response = await fetch(`${apiBaseUrl}/projects`);
@@ -275,6 +346,60 @@ async function requestColmapResult(projectId: string) {
   return (await response.json()) as ColmapResult;
 }
 
+async function requestGsplatDefaults(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/gsplat/defaults`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить настройки gsplat.");
+  }
+
+  return (await response.json()) as GsplatSettings;
+}
+
+async function requestGsplatJob(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/gsplat`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось получить статус gsplat.");
+  }
+
+  return (await response.json()) as GsplatJob;
+}
+
+async function requestGsplatStatus(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/gsplat/status`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось проверить gsplat.");
+  }
+
+  return (await response.json()) as GsplatTrainerStatus;
+}
+
+async function startGsplat(projectId: string, settings: GsplatSettings) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/gsplat`, {
+    body: JSON.stringify({ settings }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Не удалось запустить gsplat.");
+  }
+
+  return (await response.json()) as GsplatJob;
+}
+
+async function requestGsplatResult(projectId: string) {
+  const response = await fetch(`${apiBaseUrl}/projects/${encodeURIComponent(projectId)}/gsplat/result`);
+
+  if (!response.ok) {
+    throw new Error("Не удалось получить результат gsplat.");
+  }
+
+  return (await response.json()) as GsplatResult;
+}
+
 function mediaUrl(url: string) {
   return `${apiOrigin}${url}`;
 }
@@ -303,9 +428,14 @@ export default function App() {
   const [colmapSettings, setColmapSettings] = useState<ColmapSettings | null>(null);
   const [colmapJob, setColmapJob] = useState<ColmapJob | null>(null);
   const [colmapResult, setColmapResult] = useState<ColmapResult | null>(null);
-  const [isResultOpen, setIsResultOpen] = useState(false);
+  const [gsplatSettings, setGsplatSettings] = useState<GsplatSettings | null>(null);
+  const [gsplatJob, setGsplatJob] = useState<GsplatJob | null>(null);
+  const [gsplatResult, setGsplatResult] = useState<GsplatResult | null>(null);
+  const [gsplatStatus, setGsplatStatus] = useState<GsplatTrainerStatus | null>(null);
+  const [resultMode, setResultMode] = useState<ResultMode | null>(null);
   const [isColmapLoading, setIsColmapLoading] = useState(false);
-  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isGsplatLoading, setIsGsplatLoading] = useState(false);
+  const [logMode, setLogMode] = useState<LogMode | null>(null);
   const [logScrollTop, setLogScrollTop] = useState(0);
   const [lightboxImage, setLightboxImage] = useState<ProjectImage | null>(null);
   const [openImageMenuId, setOpenImageMenuId] = useState<string | null>(null);
@@ -315,6 +445,7 @@ export default function App() {
   const [isImagesLoading, setIsImagesLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const logViewportRef = useRef<HTMLDivElement>(null);
@@ -324,11 +455,17 @@ export default function App() {
     [projects, selectedId]
   );
   const colmapLogs = colmapJob?.logs ?? [];
+  const gsplatLogs = gsplatJob?.logs ?? [];
+  const activeLogs = logMode === "gsplat" ? gsplatLogs : colmapLogs;
   const logRowHeight = 22;
   const logViewportHeight = 420;
   const firstLogIndex = Math.max(0, Math.floor(logScrollTop / logRowHeight) - 8);
   const visibleLogCount = Math.ceil(logViewportHeight / logRowHeight) + 16;
-  const visibleLogs = colmapLogs.slice(firstLogIndex, firstLogIndex + visibleLogCount);
+  const visibleLogs = activeLogs.slice(firstLogIndex, firstLogIndex + visibleLogCount);
+  const gsplatRuntimeElapsed =
+    gsplatStatus?.startedAt && !gsplatStatus.available
+      ? formatElapsedTime(gsplatStatus.startedAt, nowMs)
+      : null;
 
   useEffect(() => {
     requestProjects()
@@ -357,7 +494,12 @@ export default function App() {
     setColmapSettings(null);
     setColmapJob(null);
     setColmapResult(null);
-    setIsResultOpen(false);
+    setGsplatSettings(null);
+    setGsplatJob(null);
+    setGsplatResult(null);
+    setGsplatStatus(null);
+    setResultMode(null);
+    setLogMode(null);
 
     requestProjectImages(selectedId)
       .then(setImages)
@@ -379,6 +521,24 @@ export default function App() {
     requestColmapResult(selectedId)
       .then(setColmapResult)
       .catch(() => undefined);
+
+    requestGsplatDefaults(selectedId)
+      .then(setGsplatSettings)
+      .catch((requestError: unknown) => {
+        setError(requestError instanceof Error ? requestError.message : "Ошибка загрузки gsplat.");
+      });
+
+    requestGsplatJob(selectedId)
+      .then(setGsplatJob)
+      .catch(() => undefined);
+
+    requestGsplatStatus(selectedId)
+      .then(setGsplatStatus)
+      .catch(() => undefined);
+
+    requestGsplatResult(selectedId)
+      .then(setGsplatResult)
+      .catch(() => undefined);
   }, [selectedId]);
 
   useEffect(() => {
@@ -398,14 +558,55 @@ export default function App() {
   }, [colmapJob?.status, selectedId]);
 
   useEffect(() => {
-    if (!isLogsOpen || !logViewportRef.current) {
+    if (!selectedId || gsplatJob?.status !== "running") {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      requestGsplatJob(selectedId)
+        .then(setGsplatJob)
+        .catch((requestError: unknown) => {
+          setError(requestError instanceof Error ? requestError.message : "Ошибка статуса gsplat.");
+        });
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [gsplatJob?.status, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !gsplatStatus || gsplatStatus.available) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      requestGsplatStatus(selectedId)
+        .then(setGsplatStatus)
+        .catch(() => undefined);
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [gsplatStatus?.available, selectedId]);
+
+  useEffect(() => {
+    if (!gsplatStatus?.startedAt || gsplatStatus.available) {
+      return undefined;
+    }
+
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+
+    return () => window.clearInterval(timer);
+  }, [gsplatStatus?.available, gsplatStatus?.startedAt]);
+
+  useEffect(() => {
+    if (!logMode || !logViewportRef.current) {
       return;
     }
 
-    const nextScrollTop = Math.max(0, colmapLogs.length * logRowHeight - logViewportHeight);
+    const nextScrollTop = Math.max(0, activeLogs.length * logRowHeight - logViewportHeight);
     logViewportRef.current.scrollTop = nextScrollTop;
     setLogScrollTop(nextScrollTop);
-  }, [isLogsOpen, colmapLogs.length]);
+  }, [logMode, activeLogs.length]);
 
   useEffect(() => {
     if (!selectedId || colmapJob?.status !== "done") {
@@ -416,6 +617,16 @@ export default function App() {
       .then(setColmapResult)
       .catch(() => undefined);
   }, [colmapJob?.status, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || gsplatJob?.status !== "done") {
+      return;
+    }
+
+    requestGsplatResult(selectedId)
+      .then(setGsplatResult)
+      .catch(() => undefined);
+  }, [gsplatJob?.status, selectedId]);
 
   async function handleSubmitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -679,6 +890,13 @@ export default function App() {
     setColmapSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
+  function updateGsplatSetting<Key extends keyof GsplatSettings>(
+    key: Key,
+    value: GsplatSettings[Key]
+  ) {
+    setGsplatSettings((current) => (current ? { ...current, [key]: value } : current));
+  }
+
   async function handleStartColmap() {
     if (!selectedProject || !colmapSettings) {
       return;
@@ -698,10 +916,42 @@ export default function App() {
     }
   }
 
+  async function handleStartGsplat() {
+    if (!selectedProject || !gsplatSettings || !colmapResult?.hasResult) {
+      return;
+    }
+
+    setIsGsplatLoading(true);
+    setError("");
+
+    try {
+      const status = await requestGsplatStatus(selectedProject.id);
+      setGsplatStatus(status);
+
+      if (!status.available) {
+        setError(status.message);
+        return;
+      }
+
+      const job = await startGsplat(selectedProject.id, gsplatSettings);
+      setGsplatJob(job);
+      setGsplatResult(null);
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : "Ошибка запуска gsplat.");
+    } finally {
+      setIsGsplatLoading(false);
+    }
+  }
+
   const isModalOpen = modalMode !== null;
   const modalProject = modalMode === "edit" ? selectedProject : null;
   const visibleImages = isGalleryExpanded ? images : images.slice(0, 4);
   const resultPlyUrl = colmapResult?.plyUrl ? mediaUrl(colmapResult.plyUrl) : null;
+  const gsplatPlyUrl = gsplatResult?.plyUrl ? mediaUrl(gsplatResult.plyUrl) : null;
+  const activeResultPlyUrl = resultMode === "gsplat" ? gsplatPlyUrl : resultPlyUrl;
+  const activeResultTitle = resultMode === "gsplat" ? "Результат gsplat" : "Результат COLMAP";
+  const activeResultCameras = colmapResult?.cameras ?? [];
+  const canStartGsplat = Boolean(gsplatStatus?.available);
 
   return (
     <main className="workspace">
@@ -877,7 +1127,7 @@ export default function App() {
                       className="secondary"
                       type="button"
                       onClick={() => {
-                        setIsLogsOpen(true);
+                        setLogMode("colmap");
                         setLogScrollTop(Math.max(0, colmapLogs.length * logRowHeight - logViewportHeight));
                       }}
                       disabled={colmapLogs.length === 0}
@@ -887,7 +1137,7 @@ export default function App() {
                     <button
                       className="secondary"
                       type="button"
-                      onClick={() => setIsResultOpen(true)}
+                      onClick={() => setResultMode("colmap")}
                       disabled={!resultPlyUrl || !colmapResult?.hasResult}
                     >
                       Посмотреть результат
@@ -1086,6 +1336,197 @@ export default function App() {
                 ) : null}
               </section>
             ) : null}
+
+            {colmapResult?.hasResult && gsplatSettings ? (
+              <section className="colmap-section gsplat-section" aria-label="gsplat">
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">gsplat</p>
+                    <h2>Gaussian Splatting</h2>
+                  </div>
+                  <div className="image-actions">
+                    <button
+                      className="primary"
+                      type="button"
+                      onClick={handleStartGsplat}
+                      disabled={!canStartGsplat || isGsplatLoading || gsplatJob?.status === "running"}
+                    >
+                      Запустить gsplat
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => {
+                        setLogMode("gsplat");
+                        setLogScrollTop(Math.max(0, gsplatLogs.length * logRowHeight - logViewportHeight));
+                      }}
+                      disabled={gsplatLogs.length === 0}
+                    >
+                      Показать логи
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => setResultMode("gsplat")}
+                      disabled={!gsplatPlyUrl || !gsplatResult?.hasResult}
+                    >
+                      Посмотреть PLY
+                    </button>
+                  </div>
+                </div>
+
+                {gsplatStatus ? (
+                  <p className={gsplatStatus.available ? "folder-name" : "error-message"}>
+                    {gsplatStatus.message}
+                    {gsplatRuntimeElapsed ? ` Идёт ${gsplatRuntimeElapsed}.` : ""}
+                  </p>
+                ) : (
+                  <p className="side-note">Подготовка Gaussian Splatting...</p>
+                )}
+
+                <div className="colmap-grid">
+                  <label className="field">
+                    <span>Качество</span>
+                    <select
+                      value={gsplatSettings.quality}
+                      onChange={(event) =>
+                        updateGsplatSetting("quality", event.target.value as GsplatQuality)
+                      }
+                      disabled={gsplatJob?.status === "running"}
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="high">High</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Фон/цвет</span>
+                    <select
+                      value={gsplatSettings.background}
+                      onChange={(event) =>
+                        updateGsplatSetting("background", event.target.value as GsplatBackground)
+                      }
+                      disabled={gsplatJob?.status === "running"}
+                    >
+                      <option value="black">Black</option>
+                      <option value="white">White</option>
+                      <option value="random">Random</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Шаги обучения</span>
+                    <input
+                      type="number"
+                      min="500"
+                      max="30000"
+                      step="500"
+                      value={gsplatSettings.maxSteps}
+                      onChange={(event) => updateGsplatSetting("maxSteps", Number(event.target.value))}
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Разрешение</span>
+                    <input
+                      type="number"
+                      min="384"
+                      max="1600"
+                      step="128"
+                      value={gsplatSettings.resolution}
+                      onChange={(event) => updateGsplatSetting("resolution", Number(event.target.value))}
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>SH degree</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="3"
+                      step="1"
+                      value={gsplatSettings.shDegree}
+                      onChange={(event) => updateGsplatSetting("shDegree", Number(event.target.value))}
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Downscale</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="16"
+                      step="1"
+                      value={gsplatSettings.downscaleFactor}
+                      onChange={(event) =>
+                        updateGsplatSetting("downscaleFactor", Number(event.target.value))
+                      }
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Densification interval</span>
+                    <input
+                      type="number"
+                      min="10"
+                      max="5000"
+                      step="10"
+                      value={gsplatSettings.densificationInterval}
+                      onChange={(event) =>
+                        updateGsplatSetting("densificationInterval", Number(event.target.value))
+                      }
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Opacity regularization</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={gsplatSettings.opacityRegularization}
+                      onChange={(event) =>
+                        updateGsplatSetting("opacityRegularization", Number(event.target.value))
+                      }
+                      disabled={gsplatJob?.status === "running"}
+                    />
+                  </label>
+                </div>
+
+                {gsplatJob ? (
+                  <div className="pipeline">
+                    {gsplatJob.steps.map((step) => (
+                      <div className={`pipeline-step ${step.status}`} key={step.id}>
+                        <span className="step-dot" />
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {gsplatJob?.status === "running" ? (
+                  <div className="loader-row">
+                    <span className="loader" aria-hidden="true" />
+                    <span>gsplat обучается...</span>
+                  </div>
+                ) : null}
+
+                {gsplatJob?.status === "done" && gsplatJob.output ? (
+                  <p className="folder-name">gsplat/splats.ply</p>
+                ) : null}
+
+                {gsplatJob?.status === "failed" && gsplatJob.error ? (
+                  <p className="error-message">{gsplatJob.error}</p>
+                ) : null}
+              </section>
+            ) : null}
           </div>
         ) : (
           <div className="empty-state">
@@ -1247,12 +1688,12 @@ export default function App() {
         </div>
       ) : null}
 
-      {isLogsOpen ? (
+      {logMode ? (
         <div className="modal-backdrop" role="presentation">
-          <div className="modal logs-modal" aria-label="Логи COLMAP">
+          <div className="modal logs-modal" aria-label={logMode === "gsplat" ? "Логи gsplat" : "Логи COLMAP"}>
             <header className="modal-header logs-header">
-              <h2>Логи COLMAP</h2>
-              <button className="ghost" type="button" onClick={() => setIsLogsOpen(false)}>
+              <h2>{logMode === "gsplat" ? "Логи gsplat" : "Логи COLMAP"}</h2>
+              <button className="ghost" type="button" onClick={() => setLogMode(null)}>
                 Закрыть
               </button>
             </header>
@@ -1261,7 +1702,7 @@ export default function App() {
               className="log-viewport"
               onScroll={(event) => setLogScrollTop(event.currentTarget.scrollTop)}
             >
-              <div style={{ height: colmapLogs.length * logRowHeight, position: "relative" }}>
+              <div style={{ height: activeLogs.length * logRowHeight, position: "relative" }}>
                 <div
                   className="log-lines"
                   style={{ transform: `translateY(${firstLogIndex * logRowHeight}px)` }}
@@ -1278,12 +1719,12 @@ export default function App() {
         </div>
       ) : null}
 
-      {isResultOpen && resultPlyUrl && colmapResult ? (
+      {resultMode && activeResultPlyUrl ? (
         <div className="modal-backdrop result-backdrop" role="presentation">
-          <div className="result-modal" aria-label="Результат COLMAP">
+          <div className="result-modal" aria-label={activeResultTitle}>
             <header className="result-toolbar">
-              <h2>Результат COLMAP</h2>
-              <button className="close-button" type="button" onClick={() => setIsResultOpen(false)}>
+              <h2>{activeResultTitle}</h2>
+              <button className="close-button" type="button" onClick={() => setResultMode(null)}>
                 Закрыть
               </button>
             </header>
@@ -1294,7 +1735,7 @@ export default function App() {
                 </div>
               }
             >
-              <PointCloudViewer plyUrl={resultPlyUrl} cameras={colmapResult.cameras} />
+              <PointCloudViewer plyUrl={activeResultPlyUrl} cameras={activeResultCameras} />
             </Suspense>
           </div>
         </div>
