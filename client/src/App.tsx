@@ -13,6 +13,9 @@ import type { ViewerCameraPose } from "./viewer/PointCloudViewer";
 const PointCloudViewer = lazy(() =>
   import("./viewer/PointCloudViewer").then((module) => ({ default: module.PointCloudViewer }))
 );
+const GaussianSplatViewer = lazy(() =>
+  import("./viewer/GaussianSplatViewer").then((module) => ({ default: module.GaussianSplatViewer }))
+);
 
 type Project = {
   id: string;
@@ -950,7 +953,6 @@ export default function App() {
   const gsplatPlyUrl = gsplatResult?.plyUrl ? mediaUrl(gsplatResult.plyUrl) : null;
   const activeResultPlyUrl = resultMode === "gsplat" ? gsplatPlyUrl : resultPlyUrl;
   const activeResultTitle = resultMode === "gsplat" ? "Результат gsplat" : "Результат COLMAP";
-  const activeResultCameras = colmapResult?.cameras ?? [];
   const canStartGsplat = Boolean(gsplatStatus?.available);
 
   return (
@@ -1409,9 +1411,9 @@ export default function App() {
                       }
                       disabled={gsplatJob?.status === "running"}
                     >
+                      <option value="random">Random</option>
                       <option value="black">Black</option>
                       <option value="white">White</option>
-                      <option value="random">Random</option>
                     </select>
                   </label>
 
@@ -1433,7 +1435,7 @@ export default function App() {
                     <input
                       type="number"
                       min="384"
-                      max="1600"
+                      max="4096"
                       step="128"
                       value={gsplatSettings.resolution}
                       onChange={(event) => updateGsplatSetting("resolution", Number(event.target.value))}
@@ -1446,7 +1448,7 @@ export default function App() {
                     <input
                       type="number"
                       min="0"
-                      max="3"
+                      max="4"
                       step="1"
                       value={gsplatSettings.shDegree}
                       onChange={(event) => updateGsplatSetting("shDegree", Number(event.target.value))}
@@ -1455,11 +1457,11 @@ export default function App() {
                   </label>
 
                   <label className="field">
-                    <span>Downscale</span>
+                    <span>Downscale levels</span>
                     <input
                       type="number"
-                      min="1"
-                      max="16"
+                      min="0"
+                      max="4"
                       step="1"
                       value={gsplatSettings.downscaleFactor}
                       onChange={(event) =>
@@ -1735,7 +1737,11 @@ export default function App() {
                 </div>
               }
             >
-              <PointCloudViewer plyUrl={activeResultPlyUrl} cameras={activeResultCameras} />
+              {resultMode === "gsplat" ? (
+                <GaussianSplatViewer plyUrl={activeResultPlyUrl} />
+              ) : (
+                <PointCloudViewer plyUrl={activeResultPlyUrl} cameras={colmapResult?.cameras ?? []} />
+              )}
             </Suspense>
           </div>
         </div>

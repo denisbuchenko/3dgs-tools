@@ -20,8 +20,8 @@ const maxLogLines = 5000;
 const colmapBinary = process.env.COLMAP_BIN || "/usr/bin/colmap";
 
 const defaultColmapSettings: ColmapSettings = {
-  useGpu: false,
-  gpuIndex: "-1",
+  useGpu: true,
+  gpuIndex: "0",
   matcher: "sequential",
   cameraModel: "SIMPLE_RADIAL",
   singleCamera: true,
@@ -41,8 +41,11 @@ function clamp(value: number, min: number, max: number) {
 
 export function normalizeColmapSettings(input: Partial<ColmapSettings> = {}): ColmapSettings {
   return {
-    useGpu: Boolean(input.useGpu),
-    gpuIndex: typeof input.gpuIndex === "string" && input.gpuIndex.trim() ? input.gpuIndex.trim() : "-1",
+    useGpu: input.useGpu ?? defaultColmapSettings.useGpu,
+    gpuIndex:
+      typeof input.gpuIndex === "string" && input.gpuIndex.trim()
+        ? input.gpuIndex.trim()
+        : defaultColmapSettings.gpuIndex,
     matcher: input.matcher === "exhaustive" ? "exhaustive" : "sequential",
     cameraModel:
       typeof input.cameraModel === "string" && input.cameraModel.trim()

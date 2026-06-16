@@ -30,14 +30,14 @@ let environmentStartedAt: string | null = null;
 
 const defaultGsplatSettings: GsplatSettings = {
   quality: "balanced",
-  background: "black",
+  background: "random",
   useGpu: true,
   gpuIndex: "0",
-  maxSteps: 10000,
-  resolution: 960,
-  shDegree: 2,
-  downscaleFactor: 2,
-  densificationInterval: 200,
+  maxSteps: 30000,
+  resolution: 1920,
+  shDegree: 3,
+  downscaleFactor: 3,
+  densificationInterval: 100,
   opacityRegularization: 0.0,
 };
 
@@ -52,15 +52,15 @@ export function normalizeGsplatSettings(input: Partial<GsplatSettings> = {}): Gs
         ? input.quality
         : defaultGsplatSettings.quality,
     background:
-      input.background === "white" || input.background === "random"
+      input.background === "black" || input.background === "white" || input.background === "random"
         ? input.background
         : defaultGsplatSettings.background,
     useGpu: input.useGpu ?? defaultGsplatSettings.useGpu,
     gpuIndex: typeof input.gpuIndex === "string" && input.gpuIndex.trim() ? input.gpuIndex.trim() : "0",
     maxSteps: Math.round(clamp(Number(input.maxSteps) || defaultGsplatSettings.maxSteps, 500, 30000)),
-    resolution: Math.round(clamp(Number(input.resolution) || defaultGsplatSettings.resolution, 384, 1600)),
-    shDegree: Math.round(clamp(Number(input.shDegree) || defaultGsplatSettings.shDegree, 0, 3)),
-    downscaleFactor: Math.round(clamp(Number(input.downscaleFactor) || defaultGsplatSettings.downscaleFactor, 1, 16)),
+    resolution: Math.round(clamp(Number(input.resolution) || defaultGsplatSettings.resolution, 384, 4096)),
+    shDegree: Math.round(clamp(Number(input.shDegree) || defaultGsplatSettings.shDegree, 0, 4)),
+    downscaleFactor: Math.round(clamp(Number(input.downscaleFactor) || defaultGsplatSettings.downscaleFactor, 0, 4)),
     densificationInterval: Math.round(
       clamp(Number(input.densificationInterval) || defaultGsplatSettings.densificationInterval, 10, 5000)
     ),
@@ -361,33 +361,11 @@ function createCustomGsplatArgs(project: Project, settings: GsplatSettings, work
 }
 
 function createNerfstudioProfile(settings: GsplatSettings) {
-  const qualityScale = settings.quality === "draft" ? 0.35 : settings.quality === "high" ? 0.7 : 0.5;
-  const requestedScale = clamp(settings.resolution / 1920, 0.25, 0.85);
-  const cameraScale = Number(Math.min(qualityScale, requestedScale).toFixed(2));
-  const maxSteps =
-    settings.quality === "draft"
-      ? Math.min(settings.maxSteps, 5000)
-      : settings.quality === "high"
-        ? Math.min(settings.maxSteps, 15000)
-        : Math.min(settings.maxSteps, 10000);
-  const stopSplitAt = Math.max(500, Math.min(maxSteps - 1, Math.round(maxSteps * 0.55)));
-  const stopScreenSizeAt = Math.max(500, Math.min(stopSplitAt, Math.round(maxSteps * 0.35)));
-  const shDegree =
-    settings.quality === "draft"
-      ? Math.min(settings.shDegree, 1)
-      : settings.quality === "high"
-        ? Math.min(settings.shDegree, 3)
-        : Math.min(settings.shDegree, 2);
-  const numDownscales = settings.quality === "draft" ? 3 : settings.quality === "high" ? 2 : 2;
-
   return {
-    cameraScale,
-    maxSteps,
-    numDownscales,
-    refineEvery: settings.quality === "draft" ? 250 : Math.max(100, settings.densificationInterval),
-    shDegree,
-    stopScreenSizeAt,
-    stopSplitAt,
+    maxSteps: settings.quality === "draft" ? Math.min(settings.maxSteps, 5000) : settings.maxSteps,
+    method: "splatfacto",
+    numDownscales: settings.downscaleFactor,
+    shDegree: settings.quality === "draft" ? Math.min(settings.shDegree, 2) : settings.shDegree,
   };
 }
 
@@ -395,32 +373,45 @@ function createNerfstudioTrainArgs(project: Project, settings: GsplatSettings, w
   const profile = createNerfstudioProfile(settings);
   const replacements = {
     background: settings.background,
-    cameraScale: String(profile.cameraScale),
     dataPath: path.join(workspace, "dataset"),
     maxSteps: String(profile.maxSteps),
-    numDownscales: String(profile.numDownscales),
+    method: profile.method,
     outputDir: path.join(workspace, "outputs"),
     quality: settings.quality,
-    refineEvery: String(profile.refineEvery),
-    resolution: String(settings.resolution),
     shDegree: String(profile.shDegree),
-    stopScreenSizeAt: String(profile.stopScreenSizeAt),
-    stopSplitAt: String(profile.stopSplitAt),
   };
-  const model = "splatfacto";
   const template =
     process.env.NERFSTUDIO_TRAIN_ARGS ||
-    `${model} --output-dir {outputDir} --max-num-iterations {maxSteps} --steps-per-eval-batch 0 --steps-per-eval-image 0 --steps-per-eval-all-images 0 --mixed-precision True --vis tensorboard --data {dataPath} --pipeline.datamanager.cache-images cpu --pipeline.datamanager.cache-images-type uint8 --pipeline.datamanager.camera-res-scale-factor {cameraScale} --pipeline.model.background-color {background} --pipeline.model.sh-degree {shDegree} --pipeline.model.num-downscales {numDownscales} --pipeline.model.refine-every {refineEvery} --pipeline.model.stop-split-at {stopSplitAt} --pipeline.model.stop-screen-size-at {stopScreenSizeAt} --pipeline.model.use-scale-regularization True --viewer.num-rays-per-chunk 4096`;
+    "{method} --output-dir {outputDir} --max-num-iterations {maxSteps} --vis tensorboard --steps-per-save 2000 --steps-per-eval-all-images 1000 --machine.seed 42 --pipeline.datamanager.cache-images-type uint8 --pipeline.model.sh-degree {shDegree} nerfstudio-data --data {dataPath}";
+  const args = splitArgs(replacePlaceholders(template, replacements));
 
-  return splitArgs(replacePlaceholders(template, replacements));
-}
-
-function downscaleFactorToLevels(downscaleFactor: number) {
-  if (downscaleFactor <= 1) {
-    return 0;
+  if (!process.env.NERFSTUDIO_TRAIN_ARGS && settings.background !== "random") {
+    args.splice(args.indexOf("nerfstudio-data"), 0, "--pipeline.model.background-color", settings.background);
   }
 
-  return Math.round(clamp(Math.log2(downscaleFactor), 0, 4));
+  if (!process.env.NERFSTUDIO_TRAIN_ARGS && settings.resolution < defaultGsplatSettings.resolution) {
+    const cameraScale = Number(clamp(settings.resolution / defaultGsplatSettings.resolution, 0.25, 1).toFixed(2));
+    args.splice(
+      args.indexOf("nerfstudio-data"),
+      0,
+      "--pipeline.datamanager.camera-res-scale-factor",
+      String(cameraScale)
+    );
+  }
+
+  if (
+    !process.env.NERFSTUDIO_TRAIN_ARGS &&
+    settings.densificationInterval !== defaultGsplatSettings.densificationInterval
+  ) {
+    args.splice(
+      args.indexOf("nerfstudio-data"),
+      0,
+      "--pipeline.model.refine-every",
+      String(settings.densificationInterval)
+    );
+  }
+
+  return args;
 }
 
 function createNerfstudioProcessDataArgs(project: Project, settings: GsplatSettings, datasetPath: string) {
@@ -431,10 +422,8 @@ function createNerfstudioProcessDataArgs(project: Project, settings: GsplatSetti
     "--output-dir",
     datasetPath,
     "--skip-colmap",
-    "--colmap-model-path",
-    "colmap/sparse/0",
     "--num-downscales",
-    String(downscaleFactorToLevels(settings.downscaleFactor)),
+    String(createNerfstudioProfile(settings).numDownscales),
   ];
 }
 
@@ -445,7 +434,7 @@ function createNerfstudioExportArgs(configPath: string, exportPath: string) {
   };
   const template =
     process.env.NERFSTUDIO_EXPORT_ARGS ||
-    "gaussian-splat --load-config {configPath} --output-dir {exportPath}";
+    "gaussian-splat --load-config {configPath} --output-dir {exportPath} --output-filename splats.ply --ply-color-mode sh_coeffs";
 
   return splitArgs(replacePlaceholders(template, replacements));
 }

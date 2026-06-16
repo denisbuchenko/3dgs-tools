@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/viewer/PointCloudViewer.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/viewer/GaussianSplatViewer.tsx","./src/viewer/PointCloudViewer.tsx"],"version":"5.9.3"}
