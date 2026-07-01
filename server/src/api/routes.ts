@@ -43,6 +43,10 @@ export function getProjectColmapPlyRoute(pathname: string) {
   return projectRoute(pathname, "/colmap/points\\.ply");
 }
 
+export function getProjectColmapLivePlyRoute(pathname: string) {
+  return projectRoute(pathname, "/colmap/live-preview\\.ply");
+}
+
 export function getProjectGsplatRoute(pathname: string) {
   return projectRoute(pathname, "/gsplat");
 }

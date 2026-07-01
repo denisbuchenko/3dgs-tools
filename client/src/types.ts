@@ -1,4 +1,10 @@
-import type { ViewerCameraPose } from "./viewer/PointCloudViewer";
+export type ViewerCameraPose = {
+  id: number;
+  name: string;
+  cameraId: number;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+};
 
 export type Project = {
   id: string;
@@ -59,6 +65,60 @@ export type PipelineStep = {
   id: string;
   label: string;
   status: "pending" | "running" | "done" | "failed";
+  progress?: {
+    current: number;
+    total: number;
+    percent: number;
+    message?: string;
+  };
+};
+
+export type ColmapWarning = {
+  id: string;
+  message: string;
+  createdAt: string;
+};
+
+export type ColmapMetricPoint = {
+  timestamp: string;
+  keypoints: number;
+  matches: number;
+  geometries: number;
+  points: number;
+};
+
+export type ColmapMetrics = {
+  imageCount: number;
+  featureImages: number;
+  featureKeypoints: number;
+  matchedPairs: number;
+  verifiedPairs: number;
+  databaseMatches: number;
+  databaseGeometries: number;
+  mapperImages: number;
+  mapperPoints: number;
+  series: ColmapMetricPoint[];
+  warnings: ColmapWarning[];
+};
+
+export type ColmapPreviewPoint = {
+  position: [number, number, number];
+  color: [number, number, number];
+};
+
+export type ColmapLivePreview = {
+  totalPoints: number;
+  points: ColmapPreviewPoint[];
+  updatedAt: string;
+};
+
+export type ColmapLivePly = {
+  plyUrl: string;
+  version: string;
+  pointCount: number;
+  totalPoints: number;
+  cameras: ViewerCameraPose[];
+  updatedAt: string;
 };
 
 export type ColmapJob = {
@@ -67,6 +127,9 @@ export type ColmapJob = {
   settings: ColmapSettings;
   steps: PipelineStep[];
   logs: string[];
+  metrics: ColmapMetrics;
+  preview?: ColmapLivePreview;
+  livePly?: ColmapLivePly;
   startedAt?: string;
   finishedAt?: string;
   error?: string;

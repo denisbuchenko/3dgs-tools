@@ -16,6 +16,16 @@ export const apiOrigin = import.meta.env.DEV ? "http://localhost:3000" : "";
 
 const apiBaseUrl = `${apiOrigin}/api`;
 
+export function liveWebSocketUrl(projectId: string) {
+  const origin = apiOrigin || window.location.origin;
+  const url = new URL("/api/live", origin);
+
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("projectId", projectId);
+
+  return url.toString();
+}
+
 export async function requestProjects() {
   const response = await fetch(`${apiBaseUrl}/projects`);
 

@@ -15,7 +15,7 @@
 .pipeline-step {
   min-height: 34px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
   color: #6b6f73;
   font-size: 13px;
@@ -23,10 +23,51 @@
 }
 
 .step-dot {
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
+  margin-top: 5px;
   border-radius: 50%;
   background: #c9c8c1;
+}
+
+.step-body {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 5px;
+}
+
+.step-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.step-title-row strong {
+  color: #1d1f23;
+  font-size: 12px;
+}
+
+.step-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ecebe6;
+}
+
+.step-progress span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: #2f6f8f;
+  transition: width 180ms ease;
+}
+
+.step-body small {
+  color: #7a7d80;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .pipeline-step.running .step-dot {
@@ -39,6 +80,142 @@
 
 .pipeline-step.failed .step-dot {
   background: #9d2f2f;
+}
+
+.colmap-dashboard {
+  display: grid;
+  gap: 12px;
+}
+
+.colmap-warnings {
+  display: grid;
+  gap: 6px;
+}
+
+.colmap-warnings p {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid #e6ba62;
+  border-radius: 8px;
+  background: #fff5df;
+  color: #7a4d00;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  min-height: 74px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #fbfbfa;
+}
+
+.metric-card span,
+.metric-chart-header span {
+  color: #73777a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.metric-card strong {
+  color: #16181b;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-chart {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sparse-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #111214;
+}
+
+.sparse-preview .metric-chart-header span,
+.sparse-preview .metric-chart-header strong {
+  color: #ffffff;
+}
+
+.sparse-preview svg {
+  width: 100%;
+  height: 160px;
+  display: block;
+  border-radius: 6px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    #0a0b0d;
+  background-size: 32px 32px;
+}
+
+.metric-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metric-chart-header strong {
+  color: #1d1f23;
+  font-size: 13px;
+}
+
+.metric-chart svg {
+  width: 100%;
+  height: 72px;
+  display: block;
+}
+
+.chart-grid-line {
+  fill: none;
+  stroke: #ecebe6;
+  stroke-width: 1;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-line.blue {
+  stroke: #2f6f8f;
+}
+
+.chart-line.green {
+  stroke: #257044;
+}
+
+.chart-line.orange {
+  stroke: #b86b11;
 }
 
 .loader-row {
@@ -62,5 +239,12 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 720px) {
+  .metric-grid,
+  .chart-grid {
+    grid-template-columns: 1fr;
   }
 }

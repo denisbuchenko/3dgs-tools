@@ -21,6 +21,30 @@
   color: #ffffff;
 }
 
+.viewer-subtitle {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.live-sparse-viewer,
+.live-ply-viewer {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: #0a0b0d;
+}
+
+.live-sparse-viewer canvas,
+.live-ply-viewer canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .point-viewer {
   position: relative;
   min-height: 0;

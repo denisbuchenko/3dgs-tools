@@ -48,6 +48,60 @@ export type ColmapStep = {
   status: ColmapStepStatus;
   startedAt?: string;
   finishedAt?: string;
+  progress?: {
+    current: number;
+    total: number;
+    percent: number;
+    message?: string;
+  };
+};
+
+export type ColmapWarning = {
+  id: string;
+  message: string;
+  createdAt: string;
+};
+
+export type ColmapMetricPoint = {
+  timestamp: string;
+  keypoints: number;
+  matches: number;
+  geometries: number;
+  points: number;
+};
+
+export type ColmapMetrics = {
+  imageCount: number;
+  featureImages: number;
+  featureKeypoints: number;
+  matchedPairs: number;
+  verifiedPairs: number;
+  databaseMatches: number;
+  databaseGeometries: number;
+  mapperImages: number;
+  mapperPoints: number;
+  series: ColmapMetricPoint[];
+  warnings: ColmapWarning[];
+};
+
+export type ColmapPreviewPoint = {
+  position: [number, number, number];
+  color: [number, number, number];
+};
+
+export type ColmapLivePreview = {
+  totalPoints: number;
+  points: ColmapPreviewPoint[];
+  updatedAt: string;
+};
+
+export type ColmapLivePly = {
+  plyUrl: string;
+  version: string;
+  pointCount: number;
+  totalPoints: number;
+  cameras: ColmapCameraPose[];
+  updatedAt: string;
 };
 
 export type ColmapJobStatus = "idle" | "running" | "done" | "failed";
@@ -58,9 +112,12 @@ export type ColmapJobSnapshot = {
   settings: ColmapSettings;
   steps: ColmapStep[];
   logs: string[];
+  metrics: ColmapMetrics;
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  preview?: ColmapLivePreview;
+  livePly?: ColmapLivePly;
   output?: {
     workspace: string;
     sparse: string;

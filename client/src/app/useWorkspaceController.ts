@@ -34,6 +34,7 @@ import type {
 } from "../types";
 import { formatElapsedTime } from "../utils/date";
 import { mediaUrl } from "../utils/media";
+import { useColmapLivePlySocket } from "./useColmapLivePlySocket";
 import {
   errorMessage,
   isVideoRangeValid,
@@ -62,6 +63,7 @@ export function useWorkspaceController() {
   const [gsplatStatus, setGsplatStatus] = useState<GsplatTrainerStatus | null>(null);
   const [resultMode, setResultMode] = useState<ResultMode | null>(null);
   const [isColmapLoading, setIsColmapLoading] = useState(false);
+  const [isColmapPreviewOpen, setIsColmapPreviewOpen] = useState(false);
   const [isGsplatLoading, setIsGsplatLoading] = useState(false);
   const [logMode, setLogMode] = useState<LogMode | null>(null);
   const [logScrollTop, setLogScrollTop] = useState(0);
@@ -82,6 +84,7 @@ export function useWorkspaceController() {
     () => projects.find((project) => project.id === selectedId) ?? null,
     [projects, selectedId]
   );
+  const socketLivePly = useColmapLivePlySocket(selectedId);
   const colmapLogs = colmapJob?.logs ?? [];
   const gsplatLogs = gsplatJob?.logs ?? [];
   const activeLogs = logMode === "gsplat" ? gsplatLogs : colmapLogs;
@@ -90,6 +93,8 @@ export function useWorkspaceController() {
   const visibleLogs = activeLogs.slice(firstLogIndex, firstLogIndex + visibleLogCount);
   const visibleImages = isGalleryExpanded ? images : images.slice(0, 4);
   const resultPlyUrl = colmapResult?.plyUrl ? mediaUrl(colmapResult.plyUrl) : null;
+  const colmapLivePly = socketLivePly ?? colmapJob?.livePly ?? null;
+  const colmapLivePlyUrl = colmapLivePly?.plyUrl ? mediaUrl(colmapLivePly.plyUrl) : null;
   const gsplatPlyUrl = gsplatResult?.plyUrl ? mediaUrl(gsplatResult.plyUrl) : null;
   const activeResultPlyUrl = resultMode === "gsplat" ? gsplatPlyUrl : resultPlyUrl;
   const activeResultTitle = resultMode === "gsplat" ? "Результат gsplat" : "Результат COLMAP";
@@ -192,6 +197,7 @@ export function useWorkspaceController() {
     setGsplatResult(null);
     setGsplatStatus(null);
     setResultMode(null);
+    setIsColmapPreviewOpen(false);
     setLogMode(null);
   }
 
@@ -414,15 +420,15 @@ export function useWorkspaceController() {
     projects, selectedId, selectedProject, images, visibleImages,
     isLoading, isImagesLoading, isSaving, error,
     modalMode, isVideoModalOpen, videoFile, videoMetadata, videoSettings,
-    colmapSettings, colmapJob, colmapResult, colmapLogs, resultPlyUrl,
+    colmapSettings, colmapJob, colmapResult, colmapLogs, colmapLivePly, colmapLivePlyUrl, resultPlyUrl,
     gsplatSettings, gsplatJob, gsplatResult, gsplatStatus, gsplatLogs, gsplatPlyUrl,
-    gsplatRuntimeElapsed, isColmapLoading, isGsplatLoading,
+    gsplatRuntimeElapsed, isColmapLoading, isColmapPreviewOpen, isGsplatLoading,
     resultMode, activeResultPlyUrl, activeResultTitle,
     logMode, activeLogs, firstLogIndex, visibleLogs,
     lightboxImage, openImageMenuId, isLightboxMenuOpen, isGalleryExpanded,
     fileInputRef, videoInputRef, logViewportRef,
     setSelectedId, setModalMode, setIsVideoModalOpen, setVideoSettings,
-    setLogMode, setLogScrollTop, setResultMode, setLightboxImage,
+    setLogMode, setLogScrollTop, setResultMode, setIsColmapPreviewOpen, setLightboxImage,
     setOpenImageMenuId, setIsLightboxMenuOpen, setIsGalleryExpanded,
     handleSubmitProject, handleDeleteProject, handleUploadImages, handleVideoFileChange,
     handleUploadVideo, handleDeleteImage, handleDeleteAllImages,

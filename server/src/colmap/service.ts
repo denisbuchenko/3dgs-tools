@@ -1,5 +1,6 @@
 import type { ColmapJobSnapshot, ColmapSettings, Project } from "../types.js";
 import { appendColmapLog, colmapJobs, createColmapSteps, snapshotColmapJob, type ColmapJob } from "./jobState.js";
+import { createColmapMetrics } from "./metrics.js";
 import { runColmapPipeline } from "./pipeline.js";
 import { defaultColmapSettings, normalizeColmapSettings } from "./settings.js";
 
@@ -16,6 +17,7 @@ export function startColmapJob(project: Project, input: Partial<ColmapSettings>)
     settings: normalizeColmapSettings(input),
     steps: createColmapSteps(),
     logs: [],
+    metrics: createColmapMetrics(),
     startedAt: new Date().toISOString(),
   };
 
@@ -51,5 +53,6 @@ export function getColmapJob(projectId: string): ColmapJobSnapshot {
     settings: defaultColmapSettings,
     steps: createColmapSteps(),
     logs: [],
+    metrics: createColmapMetrics(),
   };
 }

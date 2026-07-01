@@ -4,6 +4,7 @@ import {
   getColmapResult,
   getDefaultColmapSettings,
   resolveColmapPly,
+  resolveColmapLivePly,
   startColmapJob,
 } from "./colmap/index.js";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./content/index.js";
 import {
   getProjectColmapDefaultsRoute,
+  getProjectColmapLivePlyRoute,
   getProjectColmapPlyRoute,
   getProjectColmapResultRoute,
   getProjectColmapRoute,
@@ -100,6 +102,7 @@ async function handleColmapRoutes(
   const colmapId = getProjectColmapRoute(pathname);
   const resultId = getProjectColmapResultRoute(pathname);
   const plyId = getProjectColmapPlyRoute(pathname);
+  const livePlyId = getProjectColmapLivePlyRoute(pathname);
 
   if (defaultsId && request.method === "GET") {
     sendJson(response, 200, getDefaultColmapSettings());
@@ -146,6 +149,19 @@ async function handleColmapRoutes(
     }
 
     const ply = await resolveColmapPly(project);
+    sendFile(response, ply.path, "model/ply", ply.size, "no-store");
+    return true;
+  }
+
+  if (livePlyId && request.method === "GET") {
+    const { project } = await getProjectById(livePlyId);
+
+    if (!project) {
+      sendJson(response, 404, { message: "Проект не найден." });
+      return true;
+    }
+
+    const ply = await resolveColmapLivePly(project);
     sendFile(response, ply.path, "model/ply", ply.size, "no-store");
     return true;
   }

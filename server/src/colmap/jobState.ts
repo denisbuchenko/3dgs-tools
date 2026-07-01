@@ -25,7 +25,34 @@ export function snapshotColmapJob(job: ColmapJob): ColmapJobSnapshot {
   return {
     ...rest,
     logs: [...rest.logs],
-    steps: rest.steps.map((step) => ({ ...step })),
+    metrics: {
+      ...rest.metrics,
+      series: rest.metrics.series.map((point) => ({ ...point })),
+      warnings: rest.metrics.warnings.map((warning) => ({ ...warning })),
+    },
+    preview: rest.preview
+      ? {
+          ...rest.preview,
+          points: rest.preview.points.map((point) => ({
+            position: [...point.position],
+            color: [...point.color],
+          })),
+        }
+      : undefined,
+    livePly: rest.livePly
+      ? {
+          ...rest.livePly,
+          cameras: rest.livePly.cameras.map((camera) => ({
+            ...camera,
+            position: [...camera.position],
+            rotation: [...camera.rotation],
+          })),
+        }
+      : undefined,
+    steps: rest.steps.map((step) => ({
+      ...step,
+      progress: step.progress ? { ...step.progress } : undefined,
+    })),
   };
 }
 

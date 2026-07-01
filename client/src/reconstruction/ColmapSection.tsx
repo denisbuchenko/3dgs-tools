@@ -1,4 +1,5 @@
 import type { ColmapJob, ColmapMatcher, ColmapResult, ColmapSettings } from "../types";
+import { ColmapDashboard } from "./ColmapDashboard";
 import { PipelineSteps } from "./PipelineSteps";
 
 type ColmapSectionProps = {
@@ -6,8 +7,10 @@ type ColmapSectionProps = {
   colmapLogsCount: number;
   colmapResult: ColmapResult | null;
   colmapSettings: ColmapSettings;
+  hasLivePly: boolean;
   isColmapLoading: boolean;
   resultPlyUrl: string | null;
+  onOpenLivePreview: () => void;
   onOpenLogs: () => void;
   onOpenResult: () => void;
   onStart: () => void;
@@ -19,14 +22,17 @@ export function ColmapSection({
   colmapLogsCount,
   colmapResult,
   colmapSettings,
+  hasLivePly,
   isColmapLoading,
   resultPlyUrl,
+  onOpenLivePreview,
   onOpenLogs,
   onOpenResult,
   onStart,
   onUpdateSetting,
 }: ColmapSectionProps) {
   const isRunning = colmapJob?.status === "running";
+  const canOpenLivePreview = Boolean(colmapJob && (isRunning || hasLivePly));
 
   return (
     <section className="colmap-section" aria-label="COLMAP">
@@ -42,6 +48,9 @@ export function ColmapSection({
           <button className="secondary" type="button" onClick={onOpenLogs} disabled={colmapLogsCount === 0}>
             Показать логи
           </button>
+          <button className="secondary" type="button" onClick={onOpenLivePreview} disabled={!canOpenLivePreview}>
+            Live preview
+          </button>
           <button
             className="secondary"
             type="button"
@@ -52,6 +61,8 @@ export function ColmapSection({
           </button>
         </div>
       </div>
+
+      {colmapJob ? <ColmapDashboard metrics={colmapJob.metrics} preview={colmapJob.preview} /> : null}
 
       <div className="colmap-grid">
         <label className="check-field">

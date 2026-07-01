@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   logRowHeight,
   useWorkspaceController,
@@ -12,6 +13,12 @@ import { ProjectSidebar } from "./projects/ProjectSidebar";
 import { ColmapSection } from "./reconstruction/ColmapSection";
 import { GsplatSection } from "./reconstruction/GsplatSection";
 import { ResultModal } from "./results/ResultModal";
+
+const ColmapLivePreviewModal = lazy(() =>
+  import("./reconstruction/ColmapLivePreviewModal").then((module) => ({
+    default: module.ColmapLivePreviewModal,
+  }))
+);
 
 export default function App() {
   const workspace = useWorkspaceController();
@@ -74,8 +81,10 @@ export default function App() {
                 colmapLogsCount={workspace.colmapLogs.length}
                 colmapResult={workspace.colmapResult}
                 colmapSettings={workspace.colmapSettings}
+                hasLivePly={Boolean(workspace.colmapLivePly)}
                 isColmapLoading={workspace.isColmapLoading}
                 resultPlyUrl={workspace.resultPlyUrl}
+                onOpenLivePreview={() => workspace.setIsColmapPreviewOpen(true)}
                 onOpenLogs={() => workspace.openLogs("colmap", workspace.colmapLogs.length)}
                 onOpenResult={() => workspace.setResultMode("colmap")}
                 onStart={workspace.handleStartColmap}
@@ -157,6 +166,16 @@ export default function App() {
           title={workspace.activeResultTitle}
           onClose={() => workspace.setResultMode(null)}
         />
+      ) : null}
+
+      {workspace.isColmapPreviewOpen && workspace.colmapJob ? (
+        <Suspense fallback={null}>
+          <ColmapLivePreviewModal
+            livePly={workspace.colmapLivePly}
+            plyUrl={workspace.colmapLivePlyUrl}
+            onClose={() => workspace.setIsColmapPreviewOpen(false)}
+          />
+        </Suspense>
       ) : null}
 
       {workspace.lightboxImage ? (
