@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 import type { ViewerCameraPose } from "../types";
+import { CameraViewControls } from "./CameraViewControls";
+import { applyCameraView, createDefaultOrbitView, type CameraViewContext } from "./cameraView";
 import { addCameraHelpers, computeRobustBounds, createColmapToViewer, createViewerGeometry } from "./colmapSpace";
+import { useCameraViewControls } from "./useCameraViewControls";
 
 type PointCloudViewerProps = {
   plyUrl: string;
@@ -12,7 +15,14 @@ type PointCloudViewerProps = {
 
 export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraViewContextRef = useRef<CameraViewContext | null>(null);
+  const manualControlStartRef = useRef<() => void>(() => undefined);
   const [error, setError] = useState("");
+  const [sceneRevision, setSceneRevision] = useState(0);
+  const getCameraViewContext = useCallback(() => cameraViewContextRef.current, []);
+  const cameraView = useCameraViewControls(cameras, getCameraViewContext, sceneRevision);
+
+  manualControlStartRef.current = cameraView.handleManualControlStart;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -47,6 +57,11 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       controls.minPolarAngle = 0.02;
       controls.maxPolarAngle = Math.PI - 0.02;
       controls.zoomToCursor = true;
+      const mountedControls = controls;
+      const handleControlStart = () => {
+        manualControlStartRef.current();
+      };
+      mountedControls.addEventListener("start", handleControlStart);
 
       const loader = new PLYLoader();
       const geometry = await loader.loadAsync(plyUrl);
@@ -71,14 +86,20 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       scene.add(points);
 
       const disposeCameraHelpers = addCameraHelpers(scene, cameras, center, colmapToViewer);
+      const defaultView = createDefaultOrbitView(radius);
 
-      camera.position.set(radius * 1.6, -radius * 2.2, radius * 1.2);
       camera.near = Math.max(radius / 1000, 0.001);
       camera.far = Math.max(radius * 100, 1000);
-      camera.lookAt(0, 0, 0);
-      camera.updateProjectionMatrix();
-      controls.target.set(0, 0, 0);
-      controls.update();
+      applyCameraView(camera, controls, defaultView);
+      cameraViewContextRef.current = {
+        camera,
+        center,
+        colmapToViewer,
+        controls,
+        defaultView,
+        radius,
+      };
+      setSceneRevision((current) => current + 1);
 
       const resize = () => {
         if (!renderer || !targetCanvas.parentElement) {
@@ -112,6 +133,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         viewerGeometry.dispose();
         material.dispose();
         disposeCameraHelpers();
+        mountedControls.removeEventListener("start", handleControlStart);
       };
     }
 
@@ -130,6 +152,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       cleanup?.();
       controls?.dispose();
       renderer?.dispose();
+      cameraViewContextRef.current = null;
     };
   }, [cameras, plyUrl]);
 
@@ -137,6 +160,15 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
     <div className="point-viewer">
       <canvas ref={canvasRef} />
       <div className="viewer-badge">WEBGL</div>
+      {cameras.length > 0 ? (
+        <CameraViewControls
+          active={cameraView.active}
+          cameraCount={cameras.length}
+          selectedCamera={cameraView.selectedCamera}
+          onSelectedCameraChange={cameraView.setSelectedCamera}
+          onToggleActive={cameraView.toggleCameraView}
+        />
+      ) : null}
       {error ? <p className="viewer-error">{error}</p> : null}
     </div>
   );

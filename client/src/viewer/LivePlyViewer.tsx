@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 import type { ViewerCameraPose } from "../types";
+import { CameraViewControls } from "./CameraViewControls";
+import { applyCameraView, createDefaultOrbitView, type CameraViewContext } from "./cameraView";
 import { addCameraHelpers, computeRobustBounds, createColmapToViewer, createViewerGeometry } from "./colmapSpace";
+import { useCameraViewControls } from "./useCameraViewControls";
 
 type LivePlyViewerProps = {
   plyUrl: string;
@@ -34,19 +37,12 @@ function disposePoints(points: THREE.Points | null) {
   }
 }
 
-function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, radius: number) {
-  camera.position.set(radius * 1.6, -radius * 2.2, radius * 1.2);
-  camera.lookAt(0, 0, 0);
-  camera.near = Math.max(radius / 1000, 0.001);
-  camera.far = Math.max(radius * 100, 1000);
-  camera.updateProjectionMatrix();
-  controls.target.set(0, 0, 0);
-  controls.update();
-}
-
 export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<SceneContext | null>(null);
+  const cameraViewContextRef = useRef<CameraViewContext | null>(null);
+  const cameraViewActiveRef = useRef(false);
+  const manualControlStartRef = useRef<() => void>(() => undefined);
   const pointsRef = useRef<THREE.Points | null>(null);
   const disposeCameraHelpersRef = useRef<(() => void) | null>(null);
   const loadIdRef = useRef(0);
@@ -54,6 +50,12 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
   const userMovedRef = useRef(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sceneRevision, setSceneRevision] = useState(0);
+  const getCameraViewContext = useCallback(() => cameraViewContextRef.current, []);
+  const cameraView = useCameraViewControls(cameras, getCameraViewContext, sceneRevision);
+
+  cameraViewActiveRef.current = cameraView.active;
+  manualControlStartRef.current = cameraView.handleManualControlStart;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -82,9 +84,11 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
     controls.minPolarAngle = 0.02;
     controls.maxPolarAngle = Math.PI - 0.02;
     controls.zoomToCursor = true;
-    controls.addEventListener("start", () => {
+    const handleControlStart = () => {
       userMovedRef.current = true;
-    });
+      manualControlStartRef.current();
+    };
+    controls.addEventListener("start", handleControlStart);
 
     contextRef.current = { camera, controls, renderer, scene };
 
@@ -123,9 +127,11 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
       observer.disconnect();
       disposeCameraHelpersRef.current?.();
       disposePoints(pointsRef.current);
+      controls.removeEventListener("start", handleControlStart);
       controls.dispose();
       renderer.dispose();
       contextRef.current = null;
+      cameraViewContextRef.current = null;
       pointsRef.current = null;
       disposeCameraHelpersRef.current = null;
     };
@@ -160,6 +166,7 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
         const { camera, controls, scene } = context;
         const { center, radius, pointRadius } = computeRobustBounds(geometry, cameras);
         const colmapToViewer = createColmapToViewer(cameras);
+        const defaultView = createDefaultOrbitView(radius);
         const viewerGeometry = createViewerGeometry(geometry, center, colmapToViewer);
         const hasColor = Boolean(geometry.getAttribute("color"));
         const material = new THREE.PointsMaterial({
@@ -185,9 +192,18 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
         camera.near = Math.max(radius / 1000, 0.001);
         camera.far = Math.max(radius * 100, 1000);
         camera.updateProjectionMatrix();
+        cameraViewContextRef.current = {
+          camera,
+          center,
+          colmapToViewer,
+          controls,
+          defaultView,
+          radius,
+        };
+        setSceneRevision((current) => current + 1);
 
-        if (!hasFitRef.current || !userMovedRef.current) {
-          fitCamera(camera, controls, radius);
+        if ((!hasFitRef.current || !userMovedRef.current) && !cameraViewActiveRef.current) {
+          applyCameraView(camera, controls, defaultView);
           hasFitRef.current = true;
         }
 
@@ -211,6 +227,15 @@ export function LivePlyViewer({ plyUrl, cameras, version }: LivePlyViewerProps) 
     <div className="live-ply-viewer">
       <canvas ref={canvasRef} />
       <div className="viewer-badge">LIVE PLY</div>
+      {cameras.length > 0 ? (
+        <CameraViewControls
+          active={cameraView.active}
+          cameraCount={cameras.length}
+          selectedCamera={cameraView.selectedCamera}
+          onSelectedCameraChange={cameraView.setSelectedCamera}
+          onToggleActive={cameraView.toggleCameraView}
+        />
+      ) : null}
       {loading ? <div className="viewer-loading">Загружаю live preview...</div> : null}
       {error ? <p className="viewer-error">{error}</p> : null}
     </div>
