@@ -1,0 +1,66 @@
+.colmap-section {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.pipeline {
+  display: grid;
+  gap: 8px;
+}
+
+.pipeline-step {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #6b6f73;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c9c8c1;
+}
+
+.pipeline-step.running .step-dot {
+  background: #8a5f14;
+}
+
+.pipeline-step.done .step-dot {
+  background: #257044;
+}
+
+.pipeline-step.failed .step-dot {
+  background: #9d2f2f;
+}
+
+.loader-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #4f5358;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.loader {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #d6d5ce;
+  border-top-color: #1d1f23;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

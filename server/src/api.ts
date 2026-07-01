@@ -1,15 +1,37 @@
-import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { mkdir, rename, rm } from "node:fs/promises";
-import path from "node:path";
-import { uploadProjectImages } from "./imLoader.js";
 import {
   getColmapJob,
   getColmapResult,
   getDefaultColmapSettings,
   resolveColmapPly,
   startColmapJob,
-} from "./colmap.js";
+} from "./colmap/index.js";
+import {
+  deleteAllProjectImages,
+  deleteProjectImage,
+  listProjectImages,
+  resolveImagePath,
+  sendFile,
+  uploadProjectImages,
+  uploadProjectVideo,
+} from "./content/index.js";
+import {
+  getProjectColmapDefaultsRoute,
+  getProjectColmapPlyRoute,
+  getProjectColmapResultRoute,
+  getProjectColmapRoute,
+  getProjectGsplatDefaultsRoute,
+  getProjectGsplatPlyRoute,
+  getProjectGsplatResultRoute,
+  getProjectGsplatRoute,
+  getProjectGsplatStatusRoute,
+  getProjectId,
+  getProjectImageFileRoute,
+  getProjectImageRoute,
+  getProjectImagesRoute,
+  getProjectVideosRoute,
+} from "./api/routes.js";
+import { readBody, sendJson, sendNoContent } from "./api/http.js";
 import {
   getDefaultGsplatSettings,
   getGsplatJob,
@@ -17,194 +39,10 @@ import {
   getGsplatTrainerStatus,
   resolveGsplatPly,
   startGsplatJob,
-} from "./gsplat.js";
-import {
-  deleteAllProjectImages,
-  deleteProjectImage,
-  ensureProjectMediaFolders,
-  listProjectImages,
-  resolveImagePath,
-  sendFile,
-} from "./media.js";
-import { getProjectById, projectsRoot, readProjects, writeProjects } from "./storage.js";
-import type { Project, ProjectInput } from "./types.js";
-import { uploadProjectVideo } from "./videoLoader.js";
-
-function sendJson(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, {
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "no-store",
-    "Content-Type": "application/json",
-    "Expires": "0",
-    "Pragma": "no-cache",
-  });
-  response.end(JSON.stringify(body));
-}
-
-function sendNoContent(response: ServerResponse) {
-  response.writeHead(204, {
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "no-store",
-    "Expires": "0",
-    "Pragma": "no-cache",
-  });
-  response.end();
-}
-
-async function readBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  const content = Buffer.concat(chunks).toString("utf8").trim();
-
-  if (!content) {
-    return {};
-  }
-
-  return JSON.parse(content);
-}
-
-function normalizeInput(input: ProjectInput) {
-  const title = typeof input.title === "string" ? input.title.trim() : "";
-  const description = typeof input.description === "string" ? input.description.trim() : "";
-
-  if (!title) {
-    throw new Error("Название проекта обязательно.");
-  }
-
-  return {
-    title,
-    description,
-  };
-}
-
-function slugify(value: string) {
-  const slug = value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яё]+/giu, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "project";
-}
-
-function createUniqueFolderName(title: string, projects: Project[], currentId?: string) {
-  const base = slugify(title);
-  const used = new Set(
-    projects
-      .filter((project) => project.id !== currentId)
-      .map((project) => project.folderName.toLowerCase())
-  );
-
-  if (!used.has(base.toLowerCase())) {
-    return base;
-  }
-
-  let index = 2;
-  let candidate = `${base}-${index}`;
-
-  while (used.has(candidate.toLowerCase())) {
-    index += 1;
-    candidate = `${base}-${index}`;
-  }
-
-  return candidate;
-}
-
-function getProjectId(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectImagesRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/images$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectVideosRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/videos$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectColmapRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectColmapDefaultsRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/defaults$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectColmapResultRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/result$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectColmapPlyRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/colmap\/points\.ply$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectGsplatRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectGsplatDefaultsRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/defaults$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectGsplatStatusRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/status$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectGsplatResultRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/result$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectGsplatPlyRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/gsplat\/splats\.ply$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function getProjectImageFileRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/(original|thumbnail)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    projectId: decodeURIComponent(match[1]),
-    imageId: decodeURIComponent(match[2]),
-    variant: match[3] as "original" | "thumbnail",
-  };
-}
-
-function getProjectImageRoute(pathname: string) {
-  const match = pathname.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    projectId: decodeURIComponent(match[1]),
-    imageId: decodeURIComponent(match[2]),
-  };
-}
+} from "./gaussian-splat/index.js";
+import { createProject, deleteProject, touchProject, updateProject } from "./projects/index.js";
+import { getProjectById, readProjects } from "./storage.js";
+import type { ProjectInput } from "./types.js";
 
 export async function handleApi(request: IncomingMessage, response: ServerResponse) {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -214,157 +52,193 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
     return;
   }
 
-  if (url.pathname === "/api/projects" && request.method === "GET") {
+  if (url.pathname === "/api/projects") {
+    await handleProjectsCollection(request, response);
+    return;
+  }
+
+  if (await handleColmapRoutes(request, response, url.pathname)) {
+    return;
+  }
+
+  if (await handleGsplatRoutes(request, response, url.pathname)) {
+    return;
+  }
+
+  if (await handleContentRoutes(request, response, url.pathname)) {
+    return;
+  }
+
+  if (await handleProjectRoutes(request, response, url.pathname)) {
+    return;
+  }
+
+  sendJson(response, 404, { message: "Маршрут не найден." });
+}
+
+async function handleProjectsCollection(request: IncomingMessage, response: ServerResponse) {
+  if (request.method === "GET") {
     sendJson(response, 200, await readProjects());
     return;
   }
 
-  if (url.pathname === "/api/projects" && request.method === "POST") {
-    const input = normalizeInput((await readBody(request)) as ProjectInput);
-    const projects = await readProjects();
-    const now = new Date().toISOString();
-    const folderName = createUniqueFolderName(input.title, projects);
-    const project: Project = {
-      id: randomUUID(),
-      title: input.title,
-      description: input.description,
-      folderName,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await mkdir(path.join(projectsRoot, folderName), { recursive: false });
-    await ensureProjectMediaFolders(project);
-    await writeProjects([project, ...projects]);
+  if (request.method === "POST") {
+    const project = await createProject((await readBody(request)) as ProjectInput);
     sendJson(response, 201, project);
     return;
   }
 
-  const projectImagesId = getProjectImagesRoute(url.pathname);
-  const projectVideosId = getProjectVideosRoute(url.pathname);
-  const projectColmapId = getProjectColmapRoute(url.pathname);
-  const projectColmapDefaultsId = getProjectColmapDefaultsRoute(url.pathname);
-  const projectColmapResultId = getProjectColmapResultRoute(url.pathname);
-  const projectColmapPlyId = getProjectColmapPlyRoute(url.pathname);
-  const projectGsplatId = getProjectGsplatRoute(url.pathname);
-  const projectGsplatDefaultsId = getProjectGsplatDefaultsRoute(url.pathname);
-  const projectGsplatStatusId = getProjectGsplatStatusRoute(url.pathname);
-  const projectGsplatResultId = getProjectGsplatResultRoute(url.pathname);
-  const projectGsplatPlyId = getProjectGsplatPlyRoute(url.pathname);
+  sendJson(response, 404, { message: "Маршрут не найден." });
+}
 
-  if (projectColmapDefaultsId && request.method === "GET") {
+async function handleColmapRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string
+) {
+  const defaultsId = getProjectColmapDefaultsRoute(pathname);
+  const colmapId = getProjectColmapRoute(pathname);
+  const resultId = getProjectColmapResultRoute(pathname);
+  const plyId = getProjectColmapPlyRoute(pathname);
+
+  if (defaultsId && request.method === "GET") {
     sendJson(response, 200, getDefaultColmapSettings());
-    return;
+    return true;
   }
 
-  if (projectColmapId && request.method === "GET") {
-    sendJson(response, 200, getColmapJob(projectColmapId));
-    return;
+  if (colmapId && request.method === "GET") {
+    sendJson(response, 200, getColmapJob(colmapId));
+    return true;
   }
 
-  if (projectColmapId && request.method === "POST") {
-    const { project } = await getProjectById(projectColmapId);
+  if (colmapId && request.method === "POST") {
+    const { project } = await getProjectById(colmapId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const body = (await readBody(request)) as { settings?: unknown };
     const job = startColmapJob(project, (body.settings ?? {}) as Parameters<typeof startColmapJob>[1]);
     sendJson(response, 202, job);
-    return;
+    return true;
   }
 
-  if (projectColmapResultId && request.method === "GET") {
-    const { project } = await getProjectById(projectColmapResultId);
+  if (resultId && request.method === "GET") {
+    const { project } = await getProjectById(resultId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     sendJson(response, 200, await getColmapResult(project));
-    return;
+    return true;
   }
 
-  if (projectColmapPlyId && request.method === "GET") {
-    const { project } = await getProjectById(projectColmapPlyId);
+  if (plyId && request.method === "GET") {
+    const { project } = await getProjectById(plyId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const ply = await resolveColmapPly(project);
     sendFile(response, ply.path, "model/ply", ply.size, "no-store");
-    return;
+    return true;
   }
 
-  if (projectGsplatDefaultsId && request.method === "GET") {
+  return false;
+}
+
+async function handleGsplatRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string
+) {
+  const defaultsId = getProjectGsplatDefaultsRoute(pathname);
+  const statusId = getProjectGsplatStatusRoute(pathname);
+  const gsplatId = getProjectGsplatRoute(pathname);
+  const resultId = getProjectGsplatResultRoute(pathname);
+  const plyId = getProjectGsplatPlyRoute(pathname);
+
+  if (defaultsId && request.method === "GET") {
     sendJson(response, 200, getDefaultGsplatSettings());
-    return;
+    return true;
   }
 
-  if (projectGsplatStatusId && request.method === "GET") {
+  if (statusId && request.method === "GET") {
     sendJson(response, 200, await getGsplatTrainerStatus());
-    return;
+    return true;
   }
 
-  if (projectGsplatId && request.method === "GET") {
-    sendJson(response, 200, getGsplatJob(projectGsplatId));
-    return;
+  if (gsplatId && request.method === "GET") {
+    sendJson(response, 200, getGsplatJob(gsplatId));
+    return true;
   }
 
-  if (projectGsplatId && request.method === "POST") {
-    const { project } = await getProjectById(projectGsplatId);
+  if (gsplatId && request.method === "POST") {
+    const { project } = await getProjectById(gsplatId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const body = (await readBody(request)) as { settings?: unknown };
     const job = startGsplatJob(project, (body.settings ?? {}) as Parameters<typeof startGsplatJob>[1]);
     sendJson(response, 202, job);
-    return;
+    return true;
   }
 
-  if (projectGsplatResultId && request.method === "GET") {
-    const { project } = await getProjectById(projectGsplatResultId);
+  if (resultId && request.method === "GET") {
+    const { project } = await getProjectById(resultId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     sendJson(response, 200, await getGsplatResult(project));
-    return;
+    return true;
   }
 
-  if (projectGsplatPlyId && request.method === "GET") {
-    const { project } = await getProjectById(projectGsplatPlyId);
+  if (plyId && request.method === "GET") {
+    const { project } = await getProjectById(plyId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const ply = await resolveGsplatPly(project);
     sendFile(response, ply.path, "model/ply", ply.size, "no-store");
-    return;
+    return true;
   }
+
+  return false;
+}
+
+async function handleContentRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string
+) {
+  const projectImagesId = getProjectImagesRoute(pathname);
+  const projectVideosId = getProjectVideosRoute(pathname);
 
   if (projectImagesId && request.method === "GET") {
     const { project } = await getProjectById(projectImagesId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     sendJson(response, 200, await listProjectImages(project));
-    return;
+    return true;
   }
 
   if (projectImagesId && request.method === "POST") {
@@ -372,20 +246,13 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const images = await uploadProjectImages(request, project);
-    const updatedProject = {
-      ...project,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeProjects(
-      projects.map((item) => (item.id === project.id ? updatedProject : item))
-    );
+    await touchProject(project, projects);
     sendJson(response, 201, images);
-    return;
+    return true;
   }
 
   if (projectImagesId && request.method === "DELETE") {
@@ -393,21 +260,13 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     await deleteAllProjectImages(project);
-
-    const updatedProject = {
-      ...project,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeProjects(
-      projects.map((item) => (item.id === project.id ? updatedProject : item))
-    );
+    await touchProject(project, projects);
     sendNoContent(response);
-    return;
+    return true;
   }
 
   if (projectVideosId && request.method === "POST") {
@@ -415,30 +274,31 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const images = await uploadProjectVideo(request, project);
-    const updatedProject = {
-      ...project,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeProjects(
-      projects.map((item) => (item.id === project.id ? updatedProject : item))
-    );
+    await touchProject(project, projects);
     sendJson(response, 201, images);
-    return;
+    return true;
   }
 
-  const imageFileRoute = getProjectImageFileRoute(url.pathname);
+  return await handleImageFileRoutes(request, response, pathname);
+}
+
+async function handleImageFileRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string
+) {
+  const imageFileRoute = getProjectImageFileRoute(pathname);
 
   if (imageFileRoute && request.method === "GET") {
     const { project } = await getProjectById(imageFileRoute.projectId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const image = await resolveImagePath(
@@ -449,90 +309,70 @@ export async function handleApi(request: IncomingMessage, response: ServerRespon
 
     if (!image) {
       sendJson(response, 404, { message: "Изображение не найдено." });
-      return;
+      return true;
     }
 
     sendFile(response, image.path, image.contentType, image.size, "no-store");
-    return;
+    return true;
   }
 
-  const imageRoute = getProjectImageRoute(url.pathname);
+  const imageRoute = getProjectImageRoute(pathname);
 
   if (imageRoute && request.method === "DELETE") {
     const { project, projects } = await getProjectById(imageRoute.projectId);
 
     if (!project) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
     const deleted = await deleteProjectImage(project, imageRoute.imageId);
 
     if (!deleted) {
       sendJson(response, 404, { message: "Изображение не найдено." });
-      return;
+      return true;
     }
 
-    const updatedProject = {
-      ...project,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeProjects(
-      projects.map((item) => (item.id === project.id ? updatedProject : item))
-    );
+    await touchProject(project, projects);
     sendNoContent(response);
-    return;
+    return true;
   }
 
-  const projectId = getProjectId(url.pathname);
+  return false;
+}
+
+async function handleProjectRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string
+) {
+  const projectId = getProjectId(pathname);
 
   if (projectId && request.method === "PATCH") {
-    const input = normalizeInput((await readBody(request)) as ProjectInput);
-    const projects = await readProjects();
-    const project = projects.find((item) => item.id === projectId);
+    const updatedProject = await updateProject(projectId, (await readBody(request)) as ProjectInput);
 
-    if (!project) {
+    if (!updatedProject) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
-    const folderName = createUniqueFolderName(input.title, projects, projectId);
-    const updatedProject: Project = {
-      ...project,
-      title: input.title,
-      description: input.description,
-      folderName,
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (folderName !== project.folderName) {
-      await rename(path.join(projectsRoot, project.folderName), path.join(projectsRoot, folderName));
-    }
-
-    await writeProjects(
-      projects.map((item) => (item.id === projectId ? updatedProject : item))
-    );
     sendJson(response, 200, updatedProject);
-    return;
+    return true;
   }
 
   if (projectId && request.method === "DELETE") {
-    const projects = await readProjects();
-    const project = projects.find((item) => item.id === projectId);
+    const deleted = await deleteProject(projectId);
 
-    if (!project) {
+    if (!deleted) {
       sendJson(response, 404, { message: "Проект не найден." });
-      return;
+      return true;
     }
 
-    await rm(path.join(projectsRoot, project.folderName), { force: true, recursive: true });
-    await writeProjects(projects.filter((item) => item.id !== projectId));
     sendNoContent(response);
-    return;
+    return true;
   }
 
-  sendJson(response, 404, { message: "Маршрут не найден." });
+  return false;
 }
 
 export function handleApiError(response: ServerResponse, error: unknown) {

@@ -7,14 +7,9 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import busboy from "busboy";
 import sharp from "sharp";
-import {
-  deleteAllProjectImages,
-  ensureProjectMediaFolders,
-  getImagesFolder,
-  getThumbnailsFolder,
-  listProjectImages,
-} from "./media.js";
-import type { Project } from "./types.js";
+import { deleteAllProjectImages, listProjectImages } from "./images.js";
+import { ensureProjectMediaFolders, getImagesFolder, getThumbnailsFolder } from "./paths.js";
+import type { Project } from "../types.js";
 
 const maxImageUploadSize = 50 * 1024 * 1024;
 

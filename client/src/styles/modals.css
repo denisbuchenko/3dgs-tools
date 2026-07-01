@@ -1,0 +1,64 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(29, 31, 35, 0.28);
+}
+
+.modal {
+  width: min(100%, 440px);
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #fbfbfa;
+  box-shadow: 0 20px 60px rgba(29, 31, 35, 0.18);
+}
+
+.video-modal {
+  width: min(100%, 560px);
+}
+
+.logs-modal {
+  width: min(100%, 980px);
+}
+
+.modal-header {
+  padding-bottom: 2px;
+}
+
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-viewport {
+  height: 420px;
+  overflow: auto;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #111214;
+}
+
+.log-lines {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.log-line {
+  height: 22px;
+  overflow: hidden;
+  padding: 0 12px;
+  color: #e5e7eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: pre;
+}

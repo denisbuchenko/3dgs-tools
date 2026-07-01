@@ -1,93 +1,13 @@
-import { createReadStream } from "node:fs";
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
-import type { ServerResponse } from "node:http";
+import { readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
-import { projectsRoot } from "./storage.js";
-import type { Project, ProjectImage } from "./types.js";
-
-export function getProjectFolder(project: Project) {
-  return path.join(projectsRoot, project.folderName);
-}
-
-export function getImagesFolder(project: Project) {
-  return path.join(getProjectFolder(project), "images");
-}
-
-export function getThumbnailsFolder(project: Project) {
-  return path.join(getProjectFolder(project), "thumbnails");
-}
-
-export async function ensureProjectMediaFolders(project: Project) {
-  await mkdir(getImagesFolder(project), { recursive: true });
-  await mkdir(getThumbnailsFolder(project), { recursive: true });
-}
-
-export function sendFile(
-  response: ServerResponse,
-  filePath: string,
-  contentType: string,
-  size: number,
-  cacheControl = "public, max-age=31536000, immutable"
-) {
-  const noStoreHeaders =
-    cacheControl === "no-store" ? { "Expires": "0", "Pragma": "no-cache" } : {};
-
-  response.writeHead(200, {
-    "Access-Control-Allow-Origin": "*",
-    "Cache-Control": cacheControl,
-    "Content-Length": size,
-    "Content-Type": contentType,
-    ...noStoreHeaders,
-  });
-  createReadStream(filePath).pipe(response);
-}
-
-export function imageContentType(fileName: string) {
-  const extension = path.extname(fileName).toLowerCase();
-
-  if (extension === ".avif") {
-    return "image/avif";
-  }
-
-  if (extension === ".gif") {
-    return "image/gif";
-  }
-
-  if (extension === ".png") {
-    return "image/png";
-  }
-
-  if (extension === ".webp") {
-    return "image/webp";
-  }
-
-  return "image/jpeg";
-}
-
-export function imageIdFromFileName(fileName: string) {
-  return path.parse(fileName).name;
-}
-
-function isSafeImageId(imageId: string) {
-  return /^[a-z0-9-]+$/i.test(imageId);
-}
-
-export async function ensureThumbnail(project: Project, fileName: string) {
-  const id = imageIdFromFileName(fileName);
-  const imagePath = path.join(getImagesFolder(project), fileName);
-  const thumbnailPath = path.join(getThumbnailsFolder(project), `${id}.webp`);
-
-  try {
-    await stat(thumbnailPath);
-  } catch {
-    await sharp(imagePath)
-      .rotate()
-      .resize({ width: 360, height: 260, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 72 })
-      .toFile(thumbnailPath);
-  }
-}
+import { ensureProjectMediaFolders, getImagesFolder, getThumbnailsFolder } from "./paths.js";
+import {
+  ensureThumbnail,
+  imageContentType,
+  imageIdFromFileName,
+  isSafeImageId,
+} from "./thumbnails.js";
+import type { Project, ProjectImage } from "../types.js";
 
 export async function nextImageIndex(project: Project) {
   await ensureProjectMediaFolders(project);
@@ -144,14 +64,15 @@ export async function resolveImagePath(
     return null;
   }
 
+  const files = await readdir(getImagesFolder(project));
+  const fileName = files.find((file) => imageIdFromFileName(file) === imageId);
+
+  if (!fileName) {
+    return null;
+  }
+
   if (variant === "thumbnail") {
     const thumbnailPath = path.join(getThumbnailsFolder(project), `${imageId}.webp`);
-    const files = await readdir(getImagesFolder(project));
-    const fileName = files.find((file) => imageIdFromFileName(file) === imageId);
-
-    if (!fileName) {
-      return null;
-    }
 
     await ensureThumbnail(project, fileName);
 
@@ -162,13 +83,6 @@ export async function resolveImagePath(
       size: thumbnailStat.size,
       contentType: "image/webp",
     };
-  }
-
-  const files = await readdir(getImagesFolder(project));
-  const fileName = files.find((file) => imageIdFromFileName(file) === imageId);
-
-  if (!fileName) {
-    return null;
   }
 
   const imagePath = path.join(getImagesFolder(project), fileName);

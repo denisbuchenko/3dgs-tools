@@ -1,0 +1,42 @@
+.hidden-input {
+  display: none;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  color: #595d61;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.check-field {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #4f5358;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.check-field input {
+  width: 16px;
+  height: 16px;
+}
+
+.video-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.video-meta span {
+  padding: 7px 10px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #4f5358;
+  font-size: 12px;
+  font-weight: 700;
+}

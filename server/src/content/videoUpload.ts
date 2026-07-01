@@ -7,53 +7,15 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import busboy from "busboy";
-import {
-  ensureProjectMediaFolders,
-  ensureThumbnail,
-  deleteAllProjectImages,
-  getImagesFolder,
-  imageIdFromFileName,
-  listProjectImages,
-} from "./media.js";
-import type { Project, ProjectImage } from "./types.js";
-
-type VideoFields = {
-  fps?: string;
-  scalePercent?: string;
-  startSecond?: string;
-  endSecond?: string;
-};
-
-type VideoOptions = {
-  fps: number;
-  scalePercent: number;
-  startSecond: number;
-  endSecond: number | null;
-};
+import { deleteAllProjectImages, listProjectImages } from "./images.js";
+import { ensureProjectMediaFolders, getImagesFolder } from "./paths.js";
+import { ensureThumbnail, imageIdFromFileName } from "./thumbnails.js";
+import { normalizeVideoOptions, type VideoFields } from "./videoOptions.js";
+import type { Project, ProjectImage } from "../types.js";
 
 const maxVideoUploadSize = 2 * 1024 * 1024 * 1024;
 const supportedVideoExtensions = new Set([".mov"]);
 const supportedVideoMimeTypes = new Set(["video/quicktime", "video/x-quicktime"]);
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizeVideoOptions(fields: VideoFields): VideoOptions {
-  const fps = Math.round(clamp(Number(fields.fps) || 1, 1, 30));
-  const scalePercent = clamp(Number(fields.scalePercent) || 100, 1, 100);
-  const startSecond = Math.max(0, Number(fields.startSecond) || 0);
-  const rawEndSecond = Number(fields.endSecond);
-  const endSecond =
-    Number.isFinite(rawEndSecond) && rawEndSecond > startSecond ? rawEndSecond : null;
-
-  return {
-    fps,
-    scalePercent,
-    startSecond,
-    endSecond,
-  };
-}
 
 function isSupportedVideoUpload(mimeType: string, filename: string) {
   const extension = path.extname(filename).toLowerCase();

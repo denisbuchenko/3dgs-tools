@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { handleApi, handleApiError } from "./api.js";
-import { ensureGsplatEnvironment } from "./gsplat.js";
+import { ensureGsplatEnvironment } from "./gaussian-splat/index.js";
 
 const port = Number(process.env.PORT) || 3000;
 

@@ -5,3 +5,5 @@ coverage
 projects
 server/projects
 server/tools
+!server/src/projects/
+!server/src/projects/**

@@ -1,0 +1,102 @@
+.result-backdrop {
+  background: rgba(20, 21, 24, 0.76);
+}
+
+.result-modal {
+  width: min(96vw, 1280px);
+  height: min(92vh, 860px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-toolbar h2 {
+  color: #ffffff;
+}
+
+.point-viewer {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: #000000;
+}
+
+.point-viewer canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.gaussian-viewer-surface {
+  position: absolute;
+  inset: 0;
+}
+
+.gaussian-viewer-surface canvas,
+.gaussian-viewer canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.viewer-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(29, 31, 35, 0.78);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.viewer-error {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #9d2f2f;
+  font-size: 13px;
+}
+
+.viewer-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.viewer-toolbar {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.viewer-toolbar .image-menu-wrap {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+
+.viewer-toolbar .image-menu {
+  top: 44px;
+}

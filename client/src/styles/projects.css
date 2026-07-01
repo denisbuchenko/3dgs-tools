@@ -1,0 +1,92 @@
+.project-item {
+  width: 100%;
+  min-height: 54px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #4f5358;
+  text-align: left;
+}
+
+.project-item:hover {
+  background: #f0f0ec;
+}
+
+.project-item.active {
+  border-color: #d8d6cd;
+  background: #ecebe6;
+  color: #1d1f23;
+}
+
+.project-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-meta {
+  font-size: 12px;
+  color: #7a7d80;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #73777a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.project-description {
+  max-width: 620px;
+  margin: 0;
+  color: #4f5358;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.folder-name {
+  width: fit-content;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid #deddd7;
+  border-radius: 8px;
+  background: #fbfbfa;
+  color: #686b6f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+}
+
+.side-note {
+  margin: 4px 2px;
+  color: #7a7d80;
+  font-size: 13px;
+}
+
+.error-message {
+  margin: 0;
+  color: #9d2f2f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.empty-state {
+  width: 100%;
+  min-height: calc(100vh - 64px);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  color: #6b6f73;
+}
+
+.empty-state p {
+  margin: 0;
+}
