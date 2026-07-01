@@ -3,7 +3,10 @@ import { useEffect, useState, type WheelEvent } from "react";
 type CameraViewControlsProps = {
   active: boolean;
   cameraCount: number;
+  imageAvailable: boolean;
+  imageVisible: boolean;
   selectedCamera: number;
+  onImageVisibleChange: (visible: boolean) => void;
   onSelectedCameraChange: (cameraNumber: number) => void;
   onToggleActive: () => void;
 };
@@ -19,7 +22,10 @@ function clampCameraNumber(value: number, cameraCount: number) {
 export function CameraViewControls({
   active,
   cameraCount,
+  imageAvailable,
+  imageVisible,
   selectedCamera,
+  onImageVisibleChange,
   onSelectedCameraChange,
   onToggleActive,
 }: CameraViewControlsProps) {
@@ -68,6 +74,15 @@ export function CameraViewControls({
         onClick={onToggleActive}
       >
         Применить обзор
+      </button>
+      <button
+        aria-pressed={imageVisible}
+        className={imageVisible ? "camera-view-toggle is-active" : "camera-view-toggle"}
+        disabled={disabled || !active || !imageAvailable}
+        type="button"
+        onClick={() => onImageVisibleChange(!imageVisible)}
+      >
+        Показать изображение
       </button>
       <label className="camera-view-number">
         <span>Камера</span>

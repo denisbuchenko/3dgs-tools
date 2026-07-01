@@ -130,8 +130,20 @@ export type ColmapCameraPose = {
   id: number;
   name: string;
   cameraId: number;
+  intrinsics?: ColmapCameraIntrinsics;
   position: [number, number, number];
   rotation: [number, number, number, number];
+};
+
+export type ColmapCameraIntrinsics = {
+  model: string;
+  width: number;
+  height: number;
+  params: number[];
+  focalLengthX: number;
+  focalLengthY: number;
+  principalPointX?: number;
+  principalPointY?: number;
 };
 
 export type ColmapResult = {

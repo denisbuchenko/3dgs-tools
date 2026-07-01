@@ -1,5 +1,6 @@
-import { lazy, Suspense } from "react";
-import type { ColmapResult, ResultMode } from "../types";
+import { lazy, Suspense, useMemo } from "react";
+import type { ColmapResult, ProjectImage, ResultMode } from "../types";
+import { mediaUrl } from "../utils/media";
 
 const PointCloudViewer = lazy(() =>
   import("../viewer/PointCloudViewer").then((module) => ({ default: module.PointCloudViewer }))
@@ -10,13 +11,19 @@ const GaussianSplatViewer = lazy(() =>
 
 type ResultModalProps = {
   colmapResult: ColmapResult | null;
+  images: ProjectImage[];
   plyUrl: string;
   resultMode: ResultMode;
   title: string;
   onClose: () => void;
 };
 
-export function ResultModal({ colmapResult, plyUrl, resultMode, title, onClose }: ResultModalProps) {
+export function ResultModal({ colmapResult, images, plyUrl, resultMode, title, onClose }: ResultModalProps) {
+  const imageUrlByName = useMemo(
+    () => Object.fromEntries(images.map((image) => [image.fileName, mediaUrl(image.originalUrl)])),
+    [images]
+  );
+
   return (
     <div className="modal-backdrop result-backdrop" role="presentation">
       <div className="result-modal" aria-label={title}>
@@ -36,7 +43,7 @@ export function ResultModal({ colmapResult, plyUrl, resultMode, title, onClose }
           {resultMode === "gsplat" ? (
             <GaussianSplatViewer plyUrl={plyUrl} />
           ) : (
-            <PointCloudViewer plyUrl={plyUrl} cameras={colmapResult?.cameras ?? []} />
+            <PointCloudViewer imageUrlByName={imageUrlByName} plyUrl={plyUrl} cameras={colmapResult?.cameras ?? []} />
           )}
         </Suspense>
       </div>

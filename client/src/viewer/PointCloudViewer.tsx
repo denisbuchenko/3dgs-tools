@@ -6,22 +6,35 @@ import type { ViewerCameraPose } from "../types";
 import { CameraViewControls } from "./CameraViewControls";
 import { applyCameraView, createDefaultOrbitView, type CameraViewContext } from "./cameraView";
 import { addCameraHelpers, computeRobustBounds, createColmapToViewer, createViewerGeometry } from "./colmapSpace";
+import { prepareViewerViewport } from "./renderViewport";
 import { useCameraViewControls } from "./useCameraViewControls";
+import { useCameraImageOverlay } from "./useCameraImageOverlay";
 
 type PointCloudViewerProps = {
+  imageUrlByName?: Record<string, string>;
   plyUrl: string;
   cameras: ViewerCameraPose[];
 };
 
-export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
+export function PointCloudViewer({ imageUrlByName, plyUrl, cameras }: PointCloudViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraViewContextRef = useRef<CameraViewContext | null>(null);
+  const cameraViewActiveRef = useRef(false);
   const manualControlStartRef = useRef<() => void>(() => undefined);
   const [error, setError] = useState("");
   const [sceneRevision, setSceneRevision] = useState(0);
   const getCameraViewContext = useCallback(() => cameraViewContextRef.current, []);
   const cameraView = useCameraViewControls(cameras, getCameraViewContext, sceneRevision);
+  const cameraImage = useCameraImageOverlay({
+    active: cameraView.active,
+    cameras,
+    getContext: getCameraViewContext,
+    imageUrlByName,
+    sceneRevision,
+    selectedCamera: cameraView.selectedCamera,
+  });
 
+  cameraViewActiveRef.current = cameraView.active;
   manualControlStartRef.current = cameraView.handleManualControlStart;
 
   useEffect(() => {
@@ -50,6 +63,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         powerPreference: "high-performance",
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.autoClear = false;
 
       controls = new OrbitControls(camera, targetCanvas);
       controls.enableDamping = true;
@@ -86,7 +100,9 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
       scene.add(points);
 
       const disposeCameraHelpers = addCameraHelpers(scene, cameras, center, colmapToViewer);
-      const defaultView = createDefaultOrbitView(radius);
+      const parentWidth = targetCanvas.parentElement?.clientWidth ?? 1;
+      const parentHeight = targetCanvas.parentElement?.clientHeight ?? 1;
+      const defaultView = createDefaultOrbitView(radius, parentWidth / Math.max(parentHeight, 1));
 
       camera.near = Math.max(radius / 1000, 0.001);
       camera.far = Math.max(radius * 100, 1000);
@@ -98,6 +114,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         controls,
         defaultView,
         radius,
+        scene,
       };
       setSceneRevision((current) => current + 1);
 
@@ -109,7 +126,12 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         const width = targetCanvas.parentElement.clientWidth;
         const height = targetCanvas.parentElement.clientHeight;
         renderer.setSize(width, height, false);
-        camera.aspect = width / Math.max(height, 1);
+        if (!cameraViewActiveRef.current) {
+          camera.aspect = width / Math.max(height, 1);
+          if (cameraViewContextRef.current) {
+            cameraViewContextRef.current.defaultView.aspect = camera.aspect;
+          }
+        }
         camera.updateProjectionMatrix();
       };
 
@@ -119,6 +141,7 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         }
 
         controls.update();
+        prepareViewerViewport(renderer, camera, cameraViewActiveRef.current);
         renderer.render(scene, camera);
         frame = window.requestAnimationFrame(render);
       };
@@ -164,7 +187,10 @@ export function PointCloudViewer({ plyUrl, cameras }: PointCloudViewerProps) {
         <CameraViewControls
           active={cameraView.active}
           cameraCount={cameras.length}
+          imageAvailable={cameraImage.selectedImageAvailable}
+          imageVisible={cameraImage.showImage}
           selectedCamera={cameraView.selectedCamera}
+          onImageVisibleChange={cameraImage.setShowImage}
           onSelectedCameraChange={cameraView.setSelectedCamera}
           onToggleActive={cameraView.toggleCameraView}
         />

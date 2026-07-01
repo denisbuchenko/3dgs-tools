@@ -2,8 +2,20 @@ export type ViewerCameraPose = {
   id: number;
   name: string;
   cameraId: number;
+  intrinsics?: ViewerCameraIntrinsics;
   position: [number, number, number];
   rotation: [number, number, number, number];
+};
+
+export type ViewerCameraIntrinsics = {
+  model: string;
+  width: number;
+  height: number;
+  params: number[];
+  focalLengthX: number;
+  focalLengthY: number;
+  principalPointX?: number;
+  principalPointY?: number;
 };
 
 export type Project = {

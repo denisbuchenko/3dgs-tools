@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { ViewerCameraPose } from "../types";
+import { getCameraProjection } from "./cameraView";
 
 const fallbackColmapToViewer = new THREE.Matrix4().set(
   1, 0, 0, 0,
@@ -69,22 +70,10 @@ export function addCameraHelpers(
   colmapToViewer: THREE.Matrix4
 ) {
   const material = new THREE.LineBasicMaterial({ color: 0x2f6f8f });
-  const geometry = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(-0.18, -0.12, 0.3),
-    new THREE.Vector3(0.18, -0.12, 0.3),
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0.18, 0.12, 0.3),
-    new THREE.Vector3(-0.18, 0.12, 0.3),
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(-0.18, -0.12, 0.3),
-    new THREE.Vector3(-0.18, 0.12, 0.3),
-    new THREE.Vector3(0.18, 0.12, 0.3),
-    new THREE.Vector3(0.18, -0.12, 0.3),
-  ]);
-  const helpers: THREE.Line[] = [];
+  const helpers: Array<{ geometry: THREE.BufferGeometry; line: THREE.Line }> = [];
 
   for (const cameraPose of cameras) {
+    const geometry = createCameraHelperGeometry(cameraPose);
     const helper = new THREE.Line(geometry, material);
     const position = new THREE.Vector3().fromArray(cameraPose.position).sub(center);
     position.applyMatrix4(colmapToViewer);
@@ -101,16 +90,38 @@ export function addCameraHelpers(
     helper.quaternion.setFromRotationMatrix(cameraMatrix);
     helper.scale.setScalar(0.35);
     scene.add(helper);
-    helpers.push(helper);
+    helpers.push({ geometry, line: helper });
   }
 
   return () => {
     for (const helper of helpers) {
-      scene.remove(helper);
+      scene.remove(helper.line);
+      helper.geometry.dispose();
     }
-    geometry.dispose();
     material.dispose();
   };
+}
+
+function createCameraHelperGeometry(cameraPose: ViewerCameraPose) {
+  const projection = getCameraProjection(cameraPose);
+  const aspect = projection ? projection.width / projection.height : 1.5;
+  const depth = 0.3;
+  const height = 0.22;
+  const width = height * aspect;
+
+  return new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(-width / 2, -height / 2, depth),
+    new THREE.Vector3(width / 2, -height / 2, depth),
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(width / 2, height / 2, depth),
+    new THREE.Vector3(-width / 2, height / 2, depth),
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(-width / 2, -height / 2, depth),
+    new THREE.Vector3(-width / 2, height / 2, depth),
+    new THREE.Vector3(width / 2, height / 2, depth),
+    new THREE.Vector3(width / 2, -height / 2, depth),
+  ]);
 }
 
 function percentile(sorted: number[], ratio: number) {

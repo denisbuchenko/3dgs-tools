@@ -161,6 +161,7 @@ export default function App() {
       {workspace.resultMode && workspace.activeResultPlyUrl ? (
         <ResultModal
           colmapResult={workspace.colmapResult}
+          images={workspace.images}
           plyUrl={workspace.activeResultPlyUrl}
           resultMode={workspace.resultMode}
           title={workspace.activeResultTitle}
@@ -171,6 +172,7 @@ export default function App() {
       {workspace.isColmapPreviewOpen && workspace.colmapJob ? (
         <Suspense fallback={null}>
           <ColmapLivePreviewModal
+            images={workspace.images}
             livePly={workspace.colmapLivePly}
             plyUrl={workspace.colmapLivePlyUrl}
             onClose={() => workspace.setIsColmapPreviewOpen(false)}

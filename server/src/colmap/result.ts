@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { getProjectFolder } from "../content/index.js";
 import type { ColmapCameraPose, ColmapResult, Project } from "../types.js";
+import { readTextCameraIntrinsics } from "./cameraIntrinsics.js";
 
 function cameraCenterFromWorldToCamera(
   qw: number,
@@ -30,7 +31,9 @@ function cameraCenterFromWorldToCamera(
 }
 
 async function readCameraPoses(project: Project): Promise<ColmapCameraPose[]> {
-  const imagesPath = path.join(getProjectFolder(project), "colmap", "txt", "images.txt");
+  const textPath = path.join(getProjectFolder(project), "colmap", "txt");
+  const imagesPath = path.join(textPath, "images.txt");
+  const intrinsics = await readTextCameraIntrinsics(path.join(textPath, "cameras.txt")).catch(() => new Map());
 
   try {
     const content = await readFile(imagesPath, "utf8");
@@ -66,6 +69,7 @@ async function readCameraPoses(project: Project): Promise<ColmapCameraPose[]> {
         id,
         name,
         cameraId,
+        intrinsics: intrinsics.get(cameraId),
         position: cameraCenterFromWorldToCamera(qw, qx, qy, qz, tx, ty, tz),
         rotation: [-qx, -qy, -qz, qw],
       });

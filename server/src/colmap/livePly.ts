@@ -6,6 +6,7 @@ import { broadcastLiveEvent } from "../realtime/websocket.js";
 import { getProjectFolder } from "../content/index.js";
 import { appendColmapLog, type ColmapJob } from "./jobState.js";
 import type { Project } from "../types.js";
+import { readBinaryCameraIntrinsics } from "./cameraIntrinsics.js";
 
 const maxLivePlyPoints = Number(process.env.COLMAP_LIVE_PLY_MAX_POINTS || 50_000);
 
@@ -86,7 +87,10 @@ async function publishLivePly(
     return null;
   }
 
-  const cameras = await readCameraPoses(path.join(latestModel.modelPath, "images.bin")).catch(() => []);
+  const intrinsics = await readBinaryCameraIntrinsics(path.join(latestModel.modelPath, "cameras.bin")).catch(
+    () => new Map()
+  );
+  const cameras = await readCameraPoses(path.join(latestModel.modelPath, "images.bin"), intrinsics).catch(() => []);
   const plyPath = path.join(workspace, "live-preview.ply");
   const tempPath = path.join(workspace, "live-preview.tmp.ply");
 
@@ -186,7 +190,10 @@ async function readPoints(pointsPath: string) {
   return { rows, totalPoints };
 }
 
-async function readCameraPoses(imagesPath: string): Promise<ColmapCameraPose[]> {
+async function readCameraPoses(
+  imagesPath: string,
+  intrinsics: Map<number, ColmapCameraPose["intrinsics"]>
+): Promise<ColmapCameraPose[]> {
   const buffer = await readFile(imagesPath);
   const count = Number(buffer.readBigUInt64LE(0));
   const cameras: ColmapCameraPose[] = [];
@@ -226,6 +233,7 @@ async function readCameraPoses(imagesPath: string): Promise<ColmapCameraPose[]> 
       id,
       name,
       cameraId,
+      intrinsics: intrinsics.get(cameraId),
       position: cameraCenterFromWorldToCamera(qw, qx, qy, qz, tx, ty, tz),
       rotation: [-qx, -qy, -qz, qw],
     });

@@ -98,6 +98,7 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(8px);
   color: #ffffff;
+  max-width: calc(100% - 24px);
   z-index: 2;
 }
 
@@ -110,6 +111,7 @@
   color: #ffffff;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -165,6 +167,7 @@
     top: 50px;
     left: 12px;
     right: 12px;
+    flex-wrap: wrap;
     justify-content: space-between;
   }
 

@@ -1,13 +1,21 @@
-import type { ColmapLivePly } from "../types";
+import { useMemo } from "react";
+import type { ColmapLivePly, ProjectImage } from "../types";
+import { mediaUrl } from "../utils/media";
 import { LivePlyViewer } from "../viewer/LivePlyViewer";
 
 type ColmapLivePreviewModalProps = {
+  images: ProjectImage[];
   livePly: ColmapLivePly | null;
   plyUrl: string | null;
   onClose: () => void;
 };
 
-export function ColmapLivePreviewModal({ livePly, plyUrl, onClose }: ColmapLivePreviewModalProps) {
+export function ColmapLivePreviewModal({ images, livePly, plyUrl, onClose }: ColmapLivePreviewModalProps) {
+  const imageUrlByName = useMemo(
+    () => Object.fromEntries(images.map((image) => [image.fileName, mediaUrl(image.originalUrl)])),
+    [images]
+  );
+
   return (
     <div className="modal-backdrop result-backdrop" role="presentation">
       <div className="result-modal" aria-label="Live COLMAP preview">
@@ -26,7 +34,12 @@ export function ColmapLivePreviewModal({ livePly, plyUrl, onClose }: ColmapLiveP
         </header>
 
         {livePly && plyUrl ? (
-          <LivePlyViewer plyUrl={plyUrl} cameras={livePly.cameras} version={livePly.version} />
+          <LivePlyViewer
+            imageUrlByName={imageUrlByName}
+            plyUrl={plyUrl}
+            cameras={livePly.cameras}
+            version={livePly.version}
+          />
         ) : (
           <div className="point-viewer">
             <div className="viewer-loading">COLMAP ещё не сохранил промежуточные точки...</div>
