@@ -6,7 +6,9 @@ type CameraViewControlsProps = {
   imageAvailable: boolean;
   imageVisible: boolean;
   selectedCamera: number;
+  showCameras?: boolean;
   onImageVisibleChange: (visible: boolean) => void;
+  onShowCamerasChange?: (visible: boolean) => void;
   onSelectedCameraChange: (cameraNumber: number) => void;
   onToggleActive: () => void;
 };
@@ -25,7 +27,9 @@ export function CameraViewControls({
   imageAvailable,
   imageVisible,
   selectedCamera,
+  showCameras,
   onImageVisibleChange,
+  onShowCamerasChange,
   onSelectedCameraChange,
   onToggleActive,
 }: CameraViewControlsProps) {
@@ -84,6 +88,17 @@ export function CameraViewControls({
       >
         Показать изображение
       </button>
+      {onShowCamerasChange ? (
+        <button
+          aria-pressed={Boolean(showCameras)}
+          className={showCameras ? "camera-view-toggle is-active" : "camera-view-toggle"}
+          disabled={disabled}
+          type="button"
+          onClick={() => onShowCamerasChange(!showCameras)}
+        >
+          Показать камеры
+        </button>
+      ) : null}
       <label className="camera-view-number">
         <span>Камера</span>
         <input

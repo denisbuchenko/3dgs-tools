@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo } from "react";
-import type { ColmapResult, ProjectImage, ResultMode } from "../types";
+import type { ColmapResult, GsplatResult, ProjectImage, ResultMode } from "../types";
 import { mediaUrl } from "../utils/media";
 
 const PointCloudViewer = lazy(() =>
@@ -11,6 +11,7 @@ const GaussianSplatViewer = lazy(() =>
 
 type ResultModalProps = {
   colmapResult: ColmapResult | null;
+  gsplatResult: GsplatResult | null;
   images: ProjectImage[];
   plyUrl: string;
   resultMode: ResultMode;
@@ -18,7 +19,7 @@ type ResultModalProps = {
   onClose: () => void;
 };
 
-export function ResultModal({ colmapResult, images, plyUrl, resultMode, title, onClose }: ResultModalProps) {
+export function ResultModal({ colmapResult, gsplatResult, images, plyUrl, resultMode, title, onClose }: ResultModalProps) {
   const imageUrlByName = useMemo(
     () => Object.fromEntries(images.map((image) => [image.fileName, mediaUrl(image.originalUrl)])),
     [images]
@@ -41,7 +42,13 @@ export function ResultModal({ colmapResult, images, plyUrl, resultMode, title, o
           }
         >
           {resultMode === "gsplat" ? (
-            <GaussianSplatViewer plyUrl={plyUrl} />
+            <GaussianSplatViewer
+              imageUrlByName={imageUrlByName}
+              colmapPlyUrl={colmapResult?.plyUrl ? mediaUrl(colmapResult.plyUrl) : null}
+              gsplatPlyUrl={plyUrl}
+              cameras={colmapResult?.cameras ?? []}
+              modelToColmap={gsplatResult?.modelToColmap}
+            />
           ) : (
             <PointCloudViewer imageUrlByName={imageUrlByName} plyUrl={plyUrl} cameras={colmapResult?.cameras ?? []} />
           )}

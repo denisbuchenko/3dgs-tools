@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-function fitViewport(canvasWidth: number, canvasHeight: number, targetAspect: number) {
+export function fitViewport(canvasWidth: number, canvasHeight: number, targetAspect: number) {
   const canvasAspect = canvasWidth / Math.max(canvasHeight, 1);
 
   if (!Number.isFinite(targetAspect) || targetAspect <= 0) {

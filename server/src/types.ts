@@ -206,4 +206,5 @@ export type GsplatJobSnapshot = {
 export type GsplatResult = {
   hasResult: boolean;
   plyUrl: string | null;
+  modelToColmap: number[];
 };

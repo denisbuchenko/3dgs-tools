@@ -7,8 +7,8 @@ import { CameraViewControls } from "./CameraViewControls";
 import { applyCameraView, createDefaultOrbitView, type CameraViewContext } from "./cameraView";
 import { addCameraHelpers, computeRobustBounds, createColmapToViewer, createViewerGeometry } from "./colmapSpace";
 import { prepareViewerViewport } from "./renderViewport";
-import { useCameraViewControls } from "./useCameraViewControls";
 import { useCameraImageOverlay } from "./useCameraImageOverlay";
+import { useCameraViewControls } from "./useCameraViewControls";
 
 type PointCloudViewerProps = {
   imageUrlByName?: Record<string, string>;

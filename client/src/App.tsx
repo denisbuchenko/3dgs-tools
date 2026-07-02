@@ -161,6 +161,7 @@ export default function App() {
       {workspace.resultMode && workspace.activeResultPlyUrl ? (
         <ResultModal
           colmapResult={workspace.colmapResult}
+          gsplatResult={workspace.gsplatResult}
           images={workspace.images}
           plyUrl={workspace.activeResultPlyUrl}
           resultMode={workspace.resultMode}

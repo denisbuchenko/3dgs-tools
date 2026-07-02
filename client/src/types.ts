@@ -193,6 +193,7 @@ export type GsplatJob = {
 export type GsplatResult = {
   hasResult: boolean;
   plyUrl: string | null;
+  modelToColmap: number[];
 };
 
 export type GsplatTrainerStatus = {

@@ -30,7 +30,7 @@ function cameraCenterFromWorldToCamera(
   ];
 }
 
-async function readCameraPoses(project: Project): Promise<ColmapCameraPose[]> {
+export async function readColmapCameraPoses(project: Project): Promise<ColmapCameraPose[]> {
   const textPath = path.join(getProjectFolder(project), "colmap", "txt");
   const imagesPath = path.join(textPath, "images.txt");
   const intrinsics = await readTextCameraIntrinsics(path.join(textPath, "cameras.txt")).catch(() => new Map());
@@ -91,7 +91,7 @@ export async function getColmapResult(project: Project): Promise<ColmapResult> {
     return {
       hasResult: true,
       plyUrl: `/api/projects/${encodeURIComponent(project.id)}/colmap/points.ply?v=${plyVersion}`,
-      cameras: await readCameraPoses(project),
+      cameras: await readColmapCameraPoses(project),
     };
   } catch {
     return {
