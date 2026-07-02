@@ -1,14 +1,13 @@
 import * as SPLAT from "gsplat";
 import * as THREE from "three";
-import type { ViewerCameraPose } from "../types";
 
-export type SplatSceneInfo = {
-  center: SPLAT.Vector3;
-  fitDistance: number;
-  maxDimension: number;
+type SplatCameraSyncOptions = {
+  center: THREE.Vector3;
+  colmapToViewer: THREE.Matrix4;
+  modelToColmap: number[];
+  splatCamera: SPLAT.Camera;
+  viewerCamera: THREE.PerspectiveCamera;
 };
-
-export const splatFitDirection = new SPLAT.Vector3(0.72, 0.38, 1).normalize();
 
 export function matrixFromRowMajor(values: number[]) {
   if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) {
@@ -35,131 +34,47 @@ export function matrixFromRowMajor(values: number[]) {
   );
 }
 
-function createLookRotation(position: SPLAT.Vector3, target: SPLAT.Vector3) {
-  const direction = target.subtract(position).normalize();
-  const rx = Math.asin(-direction.y);
-  const ry = Math.atan2(direction.x, direction.z);
+function quaternionFromForwardImageUp(forward: THREE.Vector3, imageUp: THREE.Vector3) {
+  const normalizedForward = forward.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(normalizedForward, imageUp).normalize();
+  const down = new THREE.Vector3().crossVectors(normalizedForward, right).normalize();
 
-  return SPLAT.Quaternion.FromEuler(new SPLAT.Vector3(rx, ry, 0));
+  // gsplat cameras look along local +Z and their projection flips image Y, so
+  // source image up maps to local -Y.
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, down, normalizedForward));
 }
 
-export function getSplatSceneInfo(scene: SPLAT.Scene): SplatSceneInfo {
-  let min: SPLAT.Vector3 | null = null;
-  let max: SPLAT.Vector3 | null = null;
+export function syncSplatCameraFromColmapViewer({
+  center,
+  colmapToViewer,
+  modelToColmap,
+  splatCamera,
+  viewerCamera,
+}: SplatCameraSyncOptions) {
+  viewerCamera.updateMatrixWorld();
 
-  for (const object of scene.objects) {
-    if (object instanceof SPLAT.Splat) {
-      const bounds = object.bounds;
+  // Coordinate ownership:
+  // - COLMAP objects stay in COLMAP viewer-space: viewer = colmapToViewer * (raw - center).
+  // - Gaussian splats stay in native exported PLY-space.
+  // - Only the gsplat render camera crosses spaces: viewer -> raw COLMAP -> native splat.
+  const viewerToColmap = colmapToViewer.clone().invert();
+  const colmapToSplat = matrixFromRowMajor(modelToColmap).invert();
+  const colmapPosition = viewerCamera.position.clone().applyMatrix4(viewerToColmap).add(center);
+  const splatPosition = colmapPosition.applyMatrix4(colmapToSplat);
+  const forward = new THREE.Vector3();
+  viewerCamera.getWorldDirection(forward);
 
-      if (!min || !max) {
-        min = bounds.min.clone();
-        max = bounds.max.clone();
-      } else {
-        min = min.min(bounds.min);
-        max = max.max(bounds.max);
-      }
-    }
-  }
+  const splatForward = forward.transformDirection(viewerToColmap).transformDirection(colmapToSplat).normalize();
+  const splatUp = viewerCamera.up.clone().transformDirection(viewerToColmap).transformDirection(colmapToSplat).normalize();
+  const rotation = quaternionFromForwardImageUp(splatForward, splatUp);
+  const fov = THREE.MathUtils.degToRad(viewerCamera.fov);
+  const fy = splatCamera.data.height / (2 * Math.tan(fov / 2));
+  const fx =
+    viewerCamera.aspect > 0 ? splatCamera.data.width / (2 * viewerCamera.aspect * Math.tan(fov / 2)) : fy;
 
-  if (!min || !max) {
-    return {
-      center: new SPLAT.Vector3(0, 0, 0),
-      fitDistance: 4,
-      maxDimension: 2,
-    };
-  }
-
-  const size = max.subtract(min);
-  const maxDimension = Math.max(size.x, size.y, size.z, 0.25);
-
-  return {
-    center: min.add(max).divide(2),
-    fitDistance: Math.max(maxDimension * 1.8, 2),
-    maxDimension,
-  };
-}
-
-export function fitSplatCamera(camera: SPLAT.Camera, controls: SPLAT.OrbitControls, info: SplatSceneInfo) {
-  const position = info.center.add(splatFitDirection.multiply(info.fitDistance));
-
-  camera.position = position;
-  camera.rotation = createLookRotation(position, info.center);
-  controls.setCameraTarget(info.center);
-  controls.minZoom = Math.max(info.maxDimension * 0.03, 0.05);
-  controls.maxZoom = Math.max(info.maxDimension * 12, 10);
-}
-
-export function syncOverlayCamera(splatCamera: SPLAT.Camera, threeCamera: THREE.PerspectiveCamera) {
+  splatCamera.position = new SPLAT.Vector3(splatPosition.x, splatPosition.y, splatPosition.z);
+  splatCamera.rotation = new SPLAT.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+  splatCamera.data.fx = fx;
+  splatCamera.data.fy = fy;
   splatCamera.update();
-  threeCamera.matrixAutoUpdate = false;
-  threeCamera.projectionMatrix.fromArray(splatCamera.data.projectionMatrix.buffer);
-  threeCamera.projectionMatrixInverse.copy(threeCamera.projectionMatrix).invert();
-  threeCamera.matrixWorldInverse.fromArray(splatCamera.data.viewMatrix.buffer);
-  threeCamera.matrixWorld.copy(threeCamera.matrixWorldInverse).invert();
-  threeCamera.matrix.copy(threeCamera.matrixWorld);
-  threeCamera.matrixWorld.decompose(threeCamera.position, threeCamera.quaternion, threeCamera.scale);
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
-
-export function animateSplatCameraView(
-  camera: SPLAT.Camera,
-  controls: SPLAT.OrbitControls,
-  fromTarget: SPLAT.Vector3,
-  toPosition: SPLAT.Vector3,
-  toTarget: SPLAT.Vector3,
-  onDone: (target: SPLAT.Vector3) => void
-) {
-  const fromPosition = camera.position.clone();
-  const startTime = performance.now();
-  let frame = 0;
-  let cancelled = false;
-
-  const step = (time: number) => {
-    if (cancelled) {
-      return;
-    }
-
-    const progress = Math.min(1, (time - startTime) / 500);
-    const eased = easeInOutCubic(progress);
-    const position = fromPosition.lerp(toPosition, eased);
-    const target = fromTarget.lerp(toTarget, eased);
-
-    camera.position = position;
-    camera.rotation = createLookRotation(position, target);
-    controls.setCameraTarget(target);
-    controls.update();
-
-    if (progress < 1) {
-      frame = window.requestAnimationFrame(step);
-      return;
-    }
-
-    onDone(toTarget);
-  };
-
-  frame = window.requestAnimationFrame(step);
-
-  return () => {
-    cancelled = true;
-    window.cancelAnimationFrame(frame);
-  };
-}
-
-export function createSplatCameraView(
-  cameraPose: ViewerCameraPose,
-  colmapToSplat: THREE.Matrix4,
-  sceneInfo: SplatSceneInfo
-) {
-  const rawRotation = new THREE.Quaternion().fromArray(cameraPose.rotation);
-  const position = new THREE.Vector3().fromArray(cameraPose.position).applyMatrix4(colmapToSplat);
-  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(rawRotation).transformDirection(colmapToSplat).normalize();
-  const target = position.clone().addScaledVector(forward, Math.max(sceneInfo.maxDimension * 0.12, 0.35));
-
-  return {
-    position: new SPLAT.Vector3(position.x, position.y, position.z),
-    target: new SPLAT.Vector3(target.x, target.y, target.z),
-  };
 }
