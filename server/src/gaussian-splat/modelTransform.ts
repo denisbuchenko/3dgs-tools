@@ -2,21 +2,25 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getProjectFolder } from "../content/index.js";
 import type { Project } from "../types.js";
-import { findFirstFile, findFirstPly } from "./filesystem.js";
+import { findFirstFile } from "./filesystem.js";
 
 type Matrix4 = number[];
 type Matrix3x4 = [number[], number[], number[]];
 type Vec3 = [number, number, number];
 
 const identityMatrix: Matrix4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-const maxCenterSamples = 70000;
 
-type DatasetTransforms = {
-  applied_transform?: unknown;
-};
+// These percentiles are coupled with client/src/viewer/gaussianSplatLoader.ts.
+// The alignment radius scales splat centers to the dense object area, while the
+// tail radius estimates how much gaussian footprints must be expanded so the
+// same model does not become visually thin and gappy after display alignment.
+const alignmentRadiusPercentile = 0.8;
+const tailRadiusPercentile = 0.98;
+const maxStatsSamples = 70000;
 
 type DataparserTransforms = {
   scale?: unknown;
+  transform?: unknown;
 };
 
 function asMatrix3x4(value: unknown): Matrix3x4 | null {
@@ -79,6 +83,12 @@ function translationMatrix([x, y, z]: Vec3): Matrix4 {
   return [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z, 0, 0, 0, 1];
 }
 
+function invertRotation(rows: Matrix3x4): Matrix4 {
+  const r = rows.map((row) => row.slice(0, 3));
+
+  return [r[0][0], r[1][0], r[2][0], 0, r[0][1], r[1][1], r[2][1], 0, r[0][2], r[1][2], r[2][2], 0, 0, 0, 0, 1];
+}
+
 function applyMatrix(matrix: Matrix4, [x, y, z]: Vec3): Vec3 {
   return [
     matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3],
@@ -87,27 +97,46 @@ function applyMatrix(matrix: Matrix4, [x, y, z]: Vec3): Vec3 {
   ];
 }
 
-function median(values: number[]) {
+function percentile(values: number[], ratio: number) {
   if (values.length === 0) {
     return 0;
   }
 
   values.sort((a, b) => a - b);
-  return values[Math.floor(values.length / 2)];
+  return values[Math.min(values.length - 1, Math.floor((values.length - 1) * ratio))];
 }
 
-function medianCenter(points: Vec3[]): Vec3 | null {
+function robustStats(points: Vec3[], radiusPercentile: number) {
   if (points.length === 0) {
     return null;
   }
 
-  return [median(points.map((point) => point[0])), median(points.map((point) => point[1])), median(points.map((point) => point[2]))];
+  const center: Vec3 = [
+    percentile(
+      points.map((point) => point[0]),
+      0.5
+    ),
+    percentile(
+      points.map((point) => point[1]),
+      0.5
+    ),
+    percentile(
+      points.map((point) => point[2]),
+      0.5
+    ),
+  ];
+  const distances = points.map((point) =>
+    Math.hypot(point[0] - center[0], point[1] - center[1], point[2] - center[2])
+  );
+  const radius = percentile(distances, radiusPercentile);
+
+  return radius > 0 ? { center, radius } : null;
 }
 
-async function readColmapCenter(pointsPath: string): Promise<Vec3 | null> {
+async function readColmapPoints(pointsPath: string): Promise<Vec3[]> {
   const text = await readFile(pointsPath, "utf8");
   const lines = text.split(/\r?\n/).filter((line) => line.trim() && !line.startsWith("#"));
-  const stride = Math.max(1, Math.floor(lines.length / maxCenterSamples));
+  const stride = Math.max(1, Math.floor(lines.length / maxStatsSamples));
   const points: Vec3[] = [];
 
   for (let index = 0; index < lines.length; index += stride) {
@@ -118,7 +147,7 @@ async function readColmapCenter(pointsPath: string): Promise<Vec3 | null> {
     }
   }
 
-  return medianCenter(points);
+  return points;
 }
 
 function readPlyHeader(buffer: Buffer) {
@@ -162,12 +191,12 @@ function readPlyHeader(buffer: Buffer) {
   };
 }
 
-async function readSplatCenter(plyPath: string, transform: Matrix4): Promise<Vec3 | null> {
+async function readSplatPoints(plyPath: string): Promise<Vec3[]> {
   const buffer = await readFile(plyPath);
   const header = readPlyHeader(buffer);
 
-  if (!header || header.properties.length === 0) {
-    return null;
+  if (!header) {
+    return [];
   }
 
   const xIndex = header.properties.indexOf("x");
@@ -176,10 +205,10 @@ async function readSplatCenter(plyPath: string, transform: Matrix4): Promise<Vec
   const stride = header.properties.length * Float32Array.BYTES_PER_ELEMENT;
 
   if (xIndex < 0 || yIndex < 0 || zIndex < 0 || stride <= 0) {
-    return null;
+    return [];
   }
 
-  const sampleStride = Math.max(1, Math.floor(header.vertexCount / maxCenterSamples));
+  const sampleStride = Math.max(1, Math.floor(header.vertexCount / maxStatsSamples));
   const points: Vec3[] = [];
 
   for (let index = 0; index < header.vertexCount; index += sampleStride) {
@@ -189,76 +218,106 @@ async function readSplatCenter(plyPath: string, transform: Matrix4): Promise<Vec
       break;
     }
 
-    points.push(
-      applyMatrix(transform, [
-        buffer.readFloatLE(offset + xIndex * Float32Array.BYTES_PER_ELEMENT),
-        buffer.readFloatLE(offset + yIndex * Float32Array.BYTES_PER_ELEMENT),
-        buffer.readFloatLE(offset + zIndex * Float32Array.BYTES_PER_ELEMENT),
-      ])
-    );
+    points.push([
+      buffer.readFloatLE(offset + xIndex * Float32Array.BYTES_PER_ELEMENT),
+      buffer.readFloatLE(offset + yIndex * Float32Array.BYTES_PER_ELEMENT),
+      buffer.readFloatLE(offset + zIndex * Float32Array.BYTES_PER_ELEMENT),
+    ]);
   }
 
-  return medianCenter(points);
+  return points;
 }
 
-async function alignSplatCenter(projectFolder: string, transform: Matrix4): Promise<Matrix4> {
-  const colmapCenter = await readColmapCenter(path.join(projectFolder, "colmap", "txt", "points3D.txt")).catch(() => null);
-  const resultSplatPath = path.join(projectFolder, "gsplat", "splats.ply");
-  const splatCenter =
-    (await readSplatCenter(resultSplatPath, transform).catch(() => null)) ??
-    (await findFirstPly(path.join(projectFolder, "gsplat")).then((splatPath) =>
-      splatPath ? readSplatCenter(splatPath, transform).catch(() => null) : null
-    ));
+async function createRobustDisplayTransform(projectFolder: string, dataparserTransform: Matrix3x4) {
+  const [colmapPoints, splatPoints] = await Promise.all([
+    readColmapPoints(path.join(projectFolder, "colmap", "txt", "points3D.txt")),
+    readSplatPoints(path.join(projectFolder, "gsplat", "splats.ply")),
+  ]);
+  const rotation = invertRotation(dataparserTransform);
+  const orientedSplatPoints = splatPoints.map((point) => applyMatrix(rotation, point));
+  const colmapStats = robustStats(colmapPoints, alignmentRadiusPercentile);
+  const splatStats = robustStats(orientedSplatPoints, alignmentRadiusPercentile);
+  const colmapTailStats = robustStats(colmapPoints, tailRadiusPercentile);
+  const splatTailStats = robustStats(orientedSplatPoints, tailRadiusPercentile);
 
-  if (!colmapCenter || !splatCenter) {
-    return transform;
+  if (!colmapStats || !splatStats) {
+    return null;
   }
 
-  return multiplyMatrix(
-    translationMatrix([
-      colmapCenter[0] - splatCenter[0],
-      colmapCenter[1] - splatCenter[1],
-      colmapCenter[2] - splatCenter[2],
-    ]),
-    transform
-  );
+  const scale = colmapStats.radius / splatStats.radius;
+  const tailScale = colmapTailStats && splatTailStats ? colmapTailStats.radius / splatTailStats.radius : scale;
+
+  // Do not drop this compensation when changing alignment. Scaling centers by
+  // the dense object radius while keeping gaussian radii at the tail/outlier
+  // scale is the failure mode where splats look sparse with visible gaps.
+  const coverageScale = Math.min(3, Math.max(1, scale / tailScale));
+  const scaledSplatCenter: Vec3 = [
+    splatStats.center[0] * scale,
+    splatStats.center[1] * scale,
+    splatStats.center[2] * scale,
+  ];
+
+  return {
+    modelToColmap: multiplyMatrix(
+      multiplyMatrix(
+        translationMatrix([
+          colmapStats.center[0] - scaledSplatCenter[0],
+          colmapStats.center[1] - scaledSplatCenter[1],
+          colmapStats.center[2] - scaledSplatCenter[2],
+        ]),
+        scaleMatrix(scale)
+      ),
+      rotation
+    ),
+    splatCoverageScale: coverageScale,
+  };
 }
 
-export async function readGsplatModelToColmapTransform(project: Project): Promise<Matrix4> {
+export async function readGsplatDisplayTransform(project: Project): Promise<{
+  modelToColmap: Matrix4;
+  splatCoverageScale: number;
+}> {
   const projectFolder = getProjectFolder(project);
-  const datasetPath = path.join(projectFolder, "gsplat", "dataset", "transforms.json");
   const dataparserPath = await findFirstFile(path.join(projectFolder, "gsplat", "outputs"), "dataparser_transforms.json");
 
   if (!dataparserPath) {
-    return identityMatrix;
+    return { modelToColmap: identityMatrix, splatCoverageScale: 1 };
   }
 
   try {
-    const dataset = JSON.parse(await readFile(datasetPath, "utf8")) as DatasetTransforms;
     const dataparser = JSON.parse(await readFile(dataparserPath, "utf8")) as DataparserTransforms;
-    const appliedTransform = asMatrix3x4(dataset.applied_transform) ?? [
-      [1, 0, 0, 0],
-      [0, 0, 1, 0],
-      [0, -1, 0, 0],
-    ];
+    const dataparserTransform = asMatrix3x4(dataparser.transform);
     const scale = Number(dataparser.scale);
 
-    if (!Number.isFinite(scale) || scale <= 0) {
-      return identityMatrix;
+    if (!dataparserTransform || !Number.isFinite(scale) || scale <= 0) {
+      return { modelToColmap: identityMatrix, splatCoverageScale: 1 };
     }
 
-    // Nerfstudio's exported splat PLY is already in the export coordinate frame.
-    // Applying inverse dataparser transform here over-expands splat positions and
-    // leaves large visual gaps between gaussians, so we only undo the dataset axis
-    // transform and use dataparser scale to match COLMAP's metric size.
-    const splatToColmap = multiplyMatrix(invertRigidTransform(appliedTransform), scaleMatrix(scale));
-
-    return alignSplatCenter(projectFolder, splatToColmap);
+    // ns-export gaussian-splat writes model.means directly. For display we keep
+    // splat buffers untouched and build a camera-space bridge: Nerfstudio gives
+    // the orientation, while robust sampled bounds keep exported splats tight to
+    // the COLMAP sparse cloud despite optimization drift/outlier gaussians. The
+    // returned splatCoverageScale is part of the same display contract.
+    return (
+      (await createRobustDisplayTransform(projectFolder, dataparserTransform).catch(() => null)) ??
+      {
+        modelToColmap: multiplyMatrix(invertRigidTransform(dataparserTransform), scaleMatrix(1 / scale)),
+        splatCoverageScale: 1,
+      }
+    );
   } catch {
-    return identityMatrix;
+    return { modelToColmap: identityMatrix, splatCoverageScale: 1 };
   }
+}
+
+export async function readGsplatModelToColmapTransform(project: Project): Promise<Matrix4> {
+  return (await readGsplatDisplayTransform(project)).modelToColmap;
 }
 
 export function getIdentityModelToColmapTransform() {
   return [...identityMatrix];
+}
+
+export function getIdentitySplatCoverageScale() {
+  return 1;
 }

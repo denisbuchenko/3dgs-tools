@@ -48,6 +48,7 @@ export function ResultModal({ colmapResult, gsplatResult, images, plyUrl, result
               gsplatPlyUrl={plyUrl}
               cameras={colmapResult?.cameras ?? []}
               modelToColmap={gsplatResult?.modelToColmap}
+              splatCoverageScale={gsplatResult?.splatCoverageScale}
             />
           ) : (
             <PointCloudViewer imageUrlByName={imageUrlByName} plyUrl={plyUrl} cameras={colmapResult?.cameras ?? []} />

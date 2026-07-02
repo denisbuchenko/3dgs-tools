@@ -207,4 +207,5 @@ export type GsplatResult = {
   hasResult: boolean;
   plyUrl: string | null;
   modelToColmap: number[];
+  splatCoverageScale: number;
 };

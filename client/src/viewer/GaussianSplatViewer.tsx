@@ -9,6 +9,7 @@ type GaussianSplatViewerProps = {
   gsplatPlyUrl: string;
   imageUrlByName?: Record<string, string>;
   modelToColmap?: number[];
+  splatCoverageScale?: number;
 };
 
 const identityModelToColmap = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -19,6 +20,7 @@ export function GaussianSplatViewer({
   gsplatPlyUrl,
   imageUrlByName,
   modelToColmap = identityModelToColmap,
+  splatCoverageScale = 1,
 }: GaussianSplatViewerProps) {
   const [showSplats, setShowSplats] = useState(true);
   const [splatError, setSplatError] = useState("");
@@ -35,10 +37,11 @@ export function GaussianSplatViewer({
         onProgress: setSplatProgress,
         onStatus: setSplatStatus,
         plyUrl: gsplatPlyUrl,
+        splatCoverageScale,
         visibleRef: showSplatsRef,
       }),
     ],
-    [gsplatPlyUrl, modelToColmap]
+    [gsplatPlyUrl, modelToColmap, splatCoverageScale]
   );
 
   if (!colmapPlyUrl) {

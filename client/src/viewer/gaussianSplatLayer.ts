@@ -2,6 +2,7 @@ import * as SPLAT from "gsplat";
 import type { RefObject } from "react";
 import type { ColmapViewerLayer, ColmapViewerLayerContext } from "./ColmapViewerCore";
 import { syncSplatCameraFromColmapViewer } from "./gaussianSplatCamera";
+import { loadGaussianSplat } from "./gaussianSplatLoader";
 import { fitViewport } from "./renderViewport";
 
 type GaussianSplatLayerOptions = {
@@ -11,6 +12,7 @@ type GaussianSplatLayerOptions = {
   onError: (message: string) => void;
   onProgress: (progress: number) => void;
   onStatus: (status: string) => void;
+  splatCoverageScale: number;
 };
 
 function applySplatCanvasLayout(context: ColmapViewerLayerContext, canvas: HTMLCanvasElement) {
@@ -32,6 +34,7 @@ export function createGaussianSplatLayer({
   onProgress,
   onStatus,
   plyUrl,
+  splatCoverageScale,
   visibleRef,
 }: GaussianSplatLayerOptions): ColmapViewerLayer {
   let renderer: SPLAT.WebGLRenderer | null = null;
@@ -57,9 +60,12 @@ export function createGaussianSplatLayer({
           onProgress(Math.round(nextProgress * 100));
         }
       };
-      const load = plyUrl.toLowerCase().split("?")[0].endsWith(".splat")
-        ? SPLAT.Loader.LoadAsync(plyUrl, scene, onLoadProgress)
-        : SPLAT.PLYLoader.LoadAsync(plyUrl, scene, onLoadProgress);
+      const load = loadGaussianSplat({
+        coverageScale: splatCoverageScale,
+        onProgress: onLoadProgress,
+        plyUrl,
+        scene,
+      });
 
       load
         .then((splat) => {

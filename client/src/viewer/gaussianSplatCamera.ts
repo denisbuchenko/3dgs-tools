@@ -57,6 +57,8 @@ export function syncSplatCameraFromColmapViewer({
   // - COLMAP objects stay in COLMAP viewer-space: viewer = colmapToViewer * (raw - center).
   // - Gaussian splats stay in native exported PLY-space.
   // - Only the gsplat render camera crosses spaces: viewer -> raw COLMAP -> native splat.
+  // Do not compensate modelToColmap by moving/scaling the loaded splat object;
+  // gaussian footprint compensation belongs to gaussianSplatLoader.ts.
   const viewerToColmap = colmapToViewer.clone().invert();
   const colmapToSplat = matrixFromRowMajor(modelToColmap).invert();
   const colmapPosition = viewerCamera.position.clone().applyMatrix4(viewerToColmap).add(center);

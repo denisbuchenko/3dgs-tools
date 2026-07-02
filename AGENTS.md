@@ -27,6 +27,22 @@ single-export wrapper files for new domains.
 Keep `client/src/App.tsx` as a composition layer. Put request logic in `api`, state orchestration in
 `app`, and feature UI inside the relevant domain folder.
 
+## 3DGS Viewer Coordinate Guardrail
+
+- The 3DGS viewer intentionally reuses the COLMAP viewer space for COLMAP points and camera models.
+  COLMAP points/cameras must keep matching the regular COLMAP viewer.
+- Gaussian splat PLY data stays in native exported PLY space. Do not transform loaded `SPLAT.Splat`
+  objects for display alignment and do not call post-load `applyScale`, `applyRotation`,
+  `applyPosition`, or `recalculateBounds` for this bridge.
+- `server/src/gaussian-splat/modelTransform.ts` returns coupled values: `modelToColmap` aligns splat
+  centers to COLMAP, while `splatCoverageScale` keeps gaussian footprints dense after robust scaling.
+  If one changes, verify the other or the splat model can become thin and gappy.
+- `client/src/viewer/gaussianSplatCamera.ts` is the space bridge: only the gsplat render camera crosses
+  from COLMAP viewer space into native splat space.
+- `client/src/viewer/gaussianSplatLoader.ts` applies `splatCoverageScale` by patching PLY
+  `scale_0/1/2` before `gsplat` loads the file. Do not replace this with post-load typed-array
+  mutation; it previously caused detached/out-of-bounds buffer errors.
+
 ## Refactoring Guardrail
 
 Before large server refactors, run:

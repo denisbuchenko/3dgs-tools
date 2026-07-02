@@ -2,7 +2,11 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { getProjectFolder } from "../content/index.js";
 import type { GsplatResult, Project } from "../types.js";
-import { getIdentityModelToColmapTransform, readGsplatModelToColmapTransform } from "./modelTransform.js";
+import {
+  getIdentityModelToColmapTransform,
+  getIdentitySplatCoverageScale,
+  readGsplatDisplayTransform,
+} from "./modelTransform.js";
 
 export async function getGsplatResult(project: Project): Promise<GsplatResult> {
   const plyPath = path.join(getProjectFolder(project), "gsplat", "splats.ply");
@@ -10,17 +14,20 @@ export async function getGsplatResult(project: Project): Promise<GsplatResult> {
   try {
     const plyStat = await stat(plyPath);
     const plyVersion = `${Math.round(plyStat.mtimeMs)}-${plyStat.size}`;
+    const displayTransform = await readGsplatDisplayTransform(project);
 
     return {
       hasResult: true,
-      modelToColmap: await readGsplatModelToColmapTransform(project),
+      modelToColmap: displayTransform.modelToColmap,
       plyUrl: `/api/projects/${encodeURIComponent(project.id)}/gsplat/splats.ply?v=${plyVersion}`,
+      splatCoverageScale: displayTransform.splatCoverageScale,
     };
   } catch {
     return {
       hasResult: false,
       modelToColmap: getIdentityModelToColmapTransform(),
       plyUrl: null,
+      splatCoverageScale: getIdentitySplatCoverageScale(),
     };
   }
 }
